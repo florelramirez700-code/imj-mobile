@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>IMJ Mobile</title>
+<link rel="manifest" href="manifest.json">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+    background: #F6F9FB;
+    color: #212529;
+    padding-bottom: 80px;
+  }
+  .cache { display: none; }
+  .visible { display: block; }
+  header {
+    background: #002A7D;
+    color: white;
+    padding: 16px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  header h1 { font-size: 18px; font-weight: 600; }
+  header .agent-nom { font-size: 12px; opacity: 0.8; }
+  main { padding: 16px; max-width: 480px; margin: 0 auto; }
+  .carte {
+    background: white;
+    border-radius: 12px;
+    border: 1px solid #E4E9F0;
+    padding: 18px;
+    margin-bottom: 14px;
+  }
+  .carte h2 { font-size: 16px; margin-bottom: 12px; color: #0548B3; }
+  label { display: block; font-size: 13px; color: #212529; margin: 10px 0 4px; }
+  input, select {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #E4E9F0;
+    border-radius: 8px;
+    font-size: 15px;
+    background: #F2F2F1;
+  }
+  button {
+    width: 100%;
+    padding: 13px;
+    background: #005FDE;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    margin-top: 14px;
+    cursor: pointer;
+  }
+  button.secondaire { background: transparent; color: #9B9CA1; border: 1px solid #9B9CA1; }
+  button.rouge { background: #DC2945; }
+  .erreur { color: #DC2945; font-size: 13px; margin-top: 8px; }
+  .succes { color: #0D581A; font-size: 13px; margin-top: 8px; }
+  .ligne-attente {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid #E4E9F0;
+    font-size: 14px;
+  }
+  .badge {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 12px;
+    background: #E99A0C;
+    color: white;
+  }
+  .badge.ok { background: #0D581A; }
+  nav {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: white;
+    border-top: 1px solid #E4E9F0;
+    display: flex;
+  }
+  nav button {
+    flex: 1;
+    background: transparent;
+    color: #9B9CA1;
+    margin: 0;
+    border-radius: 0;
+    padding: 12px 0;
+    font-size: 13px;
+    font-weight: 500;
+  }
+  nav button.actif { color: #005FDE; }
+</style>
+</head>
+<body>
+
+<div id="ecran-connexion" class="visible">
+  <main style="padding-top: 60px;">
+    <div class="carte">
+      <h2 style="text-align:center; font-size:20px;">IMJ CORE Mobile</h2>
+      <label>Code agent</label>
+      <input type="text" id="login-code" placeholder="AG001" autocapitalize="characters">
+      <label>Mot de passe</label>
+      <input type="password" id="login-mdp">
+      <button onclick="seConnecter()">Se connecter</button>
+      <p id="login-message" class="erreur"></p>
+      <p style="font-size:12px; color:#9B9CA1; margin-top:14px;">La premiere connexion necessite une connexion internet. Ensuite, ca marche hors ligne.</p>
+    </div>
+  </main>
+</div>
+
+<div id="ecran-app" class="cache">
+  <header>
+    <div>
+      <h1>IMJ CORE</h1>
+      <div class="agent-nom" id="header-nom"></div>
+    </div>
+    <button class="secondaire" style="width:auto; padding:6px 12px; font-size:12px;" onclick="seDeconnecter()">Sortir</button>
+  </header>
+
+  <main>
+    <div id="page-nouveau-client" class="visible">
+      <div class="carte">
+        <h2>Nouveau client</h2>
+        <label>Nom *</label>
+        <input type="text" id="nc-nom">
+        <label>Prenom</label>
+        <input type="text" id="nc-prenom">
+        <label>Telephone *</label>
+        <input type="tel" id="nc-telephone">
+        <label>Quartier</label>
+        <input type="text" id="nc-quartier">
+        <label>Profession</label>
+        <input type="text" id="nc-profession">
+        <label>Type de carnet</label>
+        <select id="nc-type">
+          <option value="ordinaire">Ordinaire</option>
+          <option value="bloque">Bloque</option>
+        </select>
+        <label>Categorie</label>
+        <select id="nc-categorie">
+          <option value="senior">Senior</option>
+          <option value="junior">Junior</option>
+        </select>
+        <label>Mise de depart (F) *</label>
+        <input type="number" id="nc-mise">
+        <button onclick="enregistrerClient()">Enregistrer le client</button>
+        <p id="nc-message"></p>
+      </div>
+    </div>
+
+    <div id="page-mise" class="cache">
+      <div class="carte">
+        <h2>Saisir une mise</h2>
+        <label>Pour quel carnet ?</label>
+        <select id="m-mode">
+          <option value="existant">Carnet existant (je connais le numero)</option>
+          <option value="nouveau">Client cree aujourd'hui (pas encore de numero)</option>
+        </select>
+
+        <div id="m-bloc-existant">
+          <label>Numero de carnet *</label>
+          <input type="number" id="m-carnet">
+        </div>
+
+        <div id="m-bloc-nouveau" class="cache">
+          <label>Client cree aujourd'hui *</label>
+          <select id="m-client-local"></select>
+        </div>
+
+        <label>Montant unitaire (F) *</label>
+        <input type="number" id="m-montant">
+        <label>Nombre de mises</label>
+        <input type="number" id="m-nombre" value="1">
+        <button onclick="enregistrerMise()">Enregistrer la mise</button>
+        <p id="m-message"></p>
+      </div>
+    </div>
+
+    <div id="page-attente" class="cache">
+      <div class="carte">
+        <h2>En attente de synchronisation</h2>
+        <div id="liste-attente"></div>
+        <p id="rien-attente" style="font-size:14px; color:#9B9CA1;">Rien en attente.</p>
+        <button onclick="synchroniser()">Synchroniser maintenant</button>
+        <p id="sync-message"></p>
+      </div>
+    </div>
+  </main>
+
+  <nav>
+    <button id="nav-client" class="actif" onclick="allerA('nouveau-client')">Nouveau client</button>
+    <button id="nav-mise" onclick="allerA('mise')">Saisir mise</button>
+    <button id="nav-attente" onclick="allerA('attente')">En attente</button>
+  </nav>
+</div>
+
+<script>
+const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
+
+let db;
+const requeteDB = indexedDB.open("imj_mobile", 1);
+requeteDB.onupgradeneeded = (e) => {
+  db = e.target.result;
+  db.createObjectStore("session", { keyPath: "cle" });
+  db.createObjectStore("clients", { keyPath: "id_local" });
+  db.createObjectStore("mises", { keyPath: "id_local" });
+};
+requeteDB.onsuccess = (e) => {
+  db = e.target.result;
+  verifierSessionExistante();
+};
+
+function genererUUID() {
+  return crypto.randomUUID();
+}
+
+async function hacherMotDePasse(motDePasse) {
+  const donnees = new TextEncoder().encode(motDePasse);
+  const hachage = await crypto.subtle.digest("SHA-256", donnees);
+  return Array.from(new Uint8Array(hachage)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+function stockerObjet(magasin, objet) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(magasin, "readwrite");
+    tx.objectStore(magasin).put(objet);
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+function lireObjet(magasin, cle) {
+  return new Promise((resolve) => {
+    const tx = db.transaction(magasin, "readonly");
+    const requete = tx.objectStore(magasin).get(cle);
+    requete.onsuccess = () => resolve(requete.result || null);
+  });
+}
+
+function listerObjets(magasin) {
+  return new Promise((resolve) => {
+    const tx = db.transaction(magasin, "readonly");
+    const requete = tx.objectStore(magasin).getAll();
+    requete.onsuccess = () => resolve(requete.result || []);
+  });
+}
+
+async function verifierSessionExistante() {
+  const session = await lireObjet("session", "agent");
+  if (session) {
+    afficherApp(session);
+  }
+}
+
+async function seConnecter() {
+  const code = document.getElementById("login-code").value.trim().toUpperCase();
+  const motDePasse = document.getElementById("login-mdp").value;
+  const messageEl = document.getElementById("login-message");
+  messageEl.textContent = "";
+
+  if (!code || !motDePasse) {
+    messageEl.textContent = "Code agent et mot de passe obligatoires.";
+    return;
+  }
+
+  const sessionExistante = await lireObjet("session", "agent");
+  if (sessionExistante && sessionExistante.code === code) {
+    const hachageSaisi = await hacherMotDePasse(motDePasse);
+    if (hachageSaisi === sessionExistante.mot_de_passe_hash) {
+      afficherApp(sessionExistante);
+      return;
+    } else {
+      messageEl.textContent = "Mot de passe incorrect.";
+      return;
+    }
+  }
+
+  try {
+    const reponse = await fetch(`${SUPABASE_URL}/rest/v1/agents_mobile_auth?code_agent=eq.${code}&select=*`, {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` }
+    });
+    const resultats = await reponse.json();
+
+    if (!resultats.length) {
+      messageEl.textContent = "Agent inconnu. Verifie ta connexion internet ou ton code.";
+      return;
+    }
+
+    const agent = resultats[0];
+    if (!agent.actif) {
+      messageEl.textContent = "Ce compte est desactive.";
+      return;
+    }
+
+    const hachageSaisi = await hacherMotDePasse(motDePasse);
+    if (hachageSaisi !== agent.mot_de_passe_hash) {
+      messageEl.textContent = "Mot de passe incorrect.";
+      return;
+    }
+
+    const session = { cle: "agent", code: agent.code_agent, nom: agent.nom, mot_de_passe_hash: agent.mot_de_passe_hash };
+    await stockerObjet("session", session);
+    afficherApp(session);
+
+  } catch (erreur) {
+    messageEl.textContent = "Pas de connexion internet. Necessaire pour la premiere connexion.";
+  }
+}
+
+async function seDeconnecter() {
+  document.getElementById("ecran-app").className = "cache";
+  document.getElementById("ecran-connexion").className = "visible";
+  document.getElementById("login-mdp").value = "";
+}
+
+function afficherApp(session) {
+  document.getElementById("header-nom").textContent = `${session.nom} (${session.code})`;
+  document.getElementById("ecran-connexion").className = "cache";
+  document.getElementById("ecran-app").className = "visible";
+  rafraichirListeAttente();
+  rafraichirListeClientsLocaux();
+}
+
+function allerA(page) {
+  ["nouveau-client", "mise", "attente"].forEach(p => {
+    document.getElementById(`page-${p}`).className = p === page ? "visible" : "cache";
+    document.getElementById(`nav-${p === "nouveau-client" ? "client" : p}`).className = p === page ? "actif" : "";
+  });
+  if (page === "attente") rafraichirListeAttente();
+  if (page === "mise") rafraichirListeClientsLocaux();
+}
+
+document.getElementById("m-mode").addEventListener("change", (e) => {
+  const estNouveau = e.target.value === "nouveau";
+  document.getElementById("m-bloc-existant").className = estNouveau ? "cache" : "visible";
+  document.getElementById("m-bloc-nouveau").className = estNouveau ? "visible" : "cache";
+  if (estNouveau) rafraichirListeClientsLocaux();
+});
+
+async function rafraichirListeClientsLocaux() {
+  const selecteur = document.getElementById("m-client-local");
+  if (!selecteur) return;
+  const clients = await listerObjets("clients");
+  selecteur.innerHTML = "";
+  if (!clients.length) {
+    selecteur.innerHTML = "<option value=''>Aucun client cree pour l'instant</option>";
+    return;
+  }
+  clients
+    .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))
+    .forEach(c => {
+      const option = document.createElement("option");
+      option.value = c.id_local;
+      option.textContent = `${c.nom} ${c.prenom || ""} (${c.telephone})${c.synchronise ? "" : " -- pas encore synchronise"}`;
+      selecteur.appendChild(option);
+    });
+}
+
+async function enregistrerClient() {
+  const nom = document.getElementById("nc-nom").value.trim();
+  const telephone = document.getElementById("nc-telephone").value.trim();
+  const mise = parseInt(document.getElementById("nc-mise").value);
+  const messageEl = document.getElementById("nc-message");
+  messageEl.className = "erreur";
+
+  if (!nom || !telephone || !mise) {
+    messageEl.textContent = "Nom, telephone et mise sont obligatoires.";
+    return;
+  }
+
+  const session = await lireObjet("session", "agent");
+  const idLocal = genererUUID();
+
+  const client = {
+    id_local: idLocal,
+    agent_id: session.code,
+    nom: nom,
+    prenom: document.getElementById("nc-prenom").value.trim(),
+    telephone: telephone,
+    quartier: document.getElementById("nc-quartier").value.trim(),
+    profession: document.getElementById("nc-profession").value.trim(),
+    type_carnet: document.getElementById("nc-type").value,
+    categorie: document.getElementById("nc-categorie").value,
+    mise_depart: mise,
+    date_creation: new Date().toISOString().split("T")[0],
+    created_at: new Date().toISOString(),
+    statut_import: "en_attente",
+    synchronise: false
+  };
+
+  await stockerObjet("clients", client);
+
+  messageEl.className = "succes";
+  messageEl.textContent = "Client enregistre localement. Sera synchronise plus tard.";
+  ["nc-nom", "nc-prenom", "nc-telephone", "nc-quartier", "nc-profession", "nc-mise"].forEach(id => document.getElementById(id).value = "");
+  rafraichirListeAttente();
+  rafraichirListeClientsLocaux();
+}
+
+async function enregistrerMise() {
+  const mode = document.getElementById("m-mode").value;
+  const montant = parseInt(document.getElementById("m-montant").value);
+  const nombre = parseInt(document.getElementById("m-nombre").value) || 1;
+  const messageEl = document.getElementById("m-message");
+  messageEl.className = "erreur";
+
+  if (!montant) {
+    messageEl.textContent = "Le montant est obligatoire.";
+    return;
+  }
+
+  const session = await lireObjet("session", "agent");
+  const idLocal = genererUUID();
+
+  const mise = {
+    id_local: idLocal,
+    agent_id: session.code,
+    numero_carnet: null,
+    id_local_client: null,
+    montant_unitaire: montant,
+    nombre_mise: nombre,
+    date_saisie: new Date().toISOString().split("T")[0],
+    created_at: new Date().toISOString(),
+    statut_import: "en_attente",
+    synchronise: false
+  };
+
+  if (mode === "existant") {
+    const carnet = parseInt(document.getElementById("m-carnet").value);
+    if (!carnet) {
+      messageEl.textContent = "Le numero de carnet est obligatoire.";
+      return;
+    }
+    mise.numero_carnet = carnet;
+  } else {
+    const idClientLocal = document.getElementById("m-client-local").value;
+    if (!idClientLocal) {
+      messageEl.textContent = "Choisis le client cree aujourd'hui.";
+      return;
+    }
+    mise.id_local_client = idClientLocal;
+  }
+
+  await stockerObjet("mises", mise);
+
+  messageEl.className = "succes";
+  messageEl.textContent = "Mise enregistree localement. Sera synchronisee plus tard.";
+  document.getElementById("m-carnet").value = "";
+  document.getElementById("m-montant").value = "";
+  document.getElementById("m-nombre").value = "1";
+  rafraichirListeAttente();
+}
+
+async function rafraichirListeAttente() {
+  const clients = (await listerObjets("clients")).filter(c => !c.synchronise);
+  const mises = (await listerObjets("mises")).filter(m => !m.synchronise);
+  const conteneur = document.getElementById("liste-attente");
+  const rienEl = document.getElementById("rien-attente");
+
+  conteneur.innerHTML = "";
+  const total = clients.length + mises.length;
+  rienEl.style.display = total === 0 ? "block" : "none";
+
+  clients.forEach(c => {
+    conteneur.innerHTML += `<div class="ligne-attente"><span>Client : ${c.nom}</span><span class="badge">en attente</span></div>`;
+  });
+  mises.forEach(m => {
+    const cible = m.numero_carnet ? `carnet ${m.numero_carnet}` : "nouveau client (en attente de numero)";
+    conteneur.innerHTML += `<div class="ligne-attente"><span>Mise ${cible} : ${m.montant_unitaire * m.nombre_mise} F</span><span class="badge">en attente</span></div>`;
+  });
+}
+
+async function synchroniser() {
+  const messageEl = document.getElementById("sync-message");
+  messageEl.className = "";
+  messageEl.textContent = "Synchronisation en cours...";
+
+  const headers = {
+    apikey: SUPABASE_ANON_KEY,
+    Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    "Content-Type": "application/json"
+  };
+
+  let envoyes = 0;
+  let echecs = 0;
+
+  const clients = (await listerObjets("clients")).filter(c => !c.synchronise);
+  for (const client of clients) {
+    const corps = { ...client };
+    delete corps.synchronise;
+    try {
+      const reponse = await fetch(`${SUPABASE_URL}/rest/v1/clients_mobile?on_conflict=id_local`, {
+        method: "POST",
+        headers: { ...headers, Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify(corps)
+      });
+      if (reponse.ok) {
+        client.synchronise = true;
+        await stockerObjet("clients", client);
+        envoyes++;
+      } else {
+        echecs++;
+      }
+    } catch (e) { echecs++; }
+  }
+
+  // On envoie d'abord les CLIENTS, puis les MISES -- important pour que le pont
+  // ait le temps d'importer les clients avant que les mises liees (via
+  // id_local_client) arrivent, sinon elles echoueraient (numero pas encore assigne).
+  const mises = (await listerObjets("mises")).filter(m => !m.synchronise);
+  for (const mise of mises) {
+    const corps = { ...mise };
+    delete corps.synchronise;
+    try {
+      const reponse = await fetch(`${SUPABASE_URL}/rest/v1/mises_mobile?on_conflict=id_local`, {
+        method: "POST",
+        headers: { ...headers, Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify(corps)
+      });
+      if (reponse.ok) {
+        mise.synchronise = true;
+        await stockerObjet("mises", mise);
+        envoyes++;
+      } else {
+        echecs++;
+      }
+    } catch (e) { echecs++; }
+  }
+
+  messageEl.className = echecs === 0 ? "succes" : "erreur";
+  messageEl.textContent = `${envoyes} element(s) synchronise(s), ${echecs} echec(s). ${echecs > 0 ? "Verifie ta connexion." : ""}`;
+  rafraichirListeAttente();
+}
+</script>
+</body>
+</html>
