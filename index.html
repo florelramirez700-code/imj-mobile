@@ -487,6 +487,7 @@ async function synchroniser() {
 
   let envoyes = 0;
   let echecs = 0;
+  const detailsErreurs = [];
 
   const clients = (await listerObjets("clients")).filter(c => !c.synchronise);
   for (const client of clients) {
@@ -503,9 +504,14 @@ async function synchroniser() {
         await stockerObjet("clients", client);
         envoyes++;
       } else {
+        const texteErreur = await reponse.text();
+        detailsErreurs.push(`Client ${client.nom} : HTTP ${reponse.status} -- ${texteErreur.slice(0, 200)}`);
         echecs++;
       }
-    } catch (e) { echecs++; }
+    } catch (e) {
+      detailsErreurs.push(`Client ${client.nom} : erreur reseau -- ${e.message}`);
+      echecs++;
+    }
   }
 
   // On envoie d'abord les CLIENTS, puis les MISES -- important pour que le pont
@@ -526,13 +532,22 @@ async function synchroniser() {
         await stockerObjet("mises", mise);
         envoyes++;
       } else {
+        const texteErreur = await reponse.text();
+        detailsErreurs.push(`Mise (carnet ${mise.numero_carnet || "nouveau client"}) : HTTP ${reponse.status} -- ${texteErreur.slice(0, 200)}`);
         echecs++;
       }
-    } catch (e) { echecs++; }
+    } catch (e) {
+      detailsErreurs.push(`Mise (carnet ${mise.numero_carnet || "nouveau client"}) : erreur reseau -- ${e.message}`);
+      echecs++;
+    }
   }
 
   messageEl.className = echecs === 0 ? "succes" : "erreur";
-  messageEl.textContent = `${envoyes} element(s) synchronise(s), ${echecs} echec(s). ${echecs > 0 ? "Verifie ta connexion." : ""}`;
+  let texteResume = `${envoyes} element(s) synchronise(s), ${echecs} echec(s).`;
+  if (detailsErreurs.length > 0) {
+    texteResume += "<br><br><b>Detail des erreurs :</b><br>" + detailsErreurs.map(d => d.replace(/</g, "&lt;")).join("<br>");
+  }
+  messageEl.innerHTML = texteResume;
   rafraichirListeAttente();
 }
 </script>
