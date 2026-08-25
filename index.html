@@ -87,8 +87,8 @@
     color: #9B9CA1;
     margin: 0;
     border-radius: 0;
-    padding: 12px 0;
-    font-size: 13px;
+    padding: 10px 2px;
+    font-size: 11px;
     font-weight: 500;
   }
   nav button.actif { color: #005FDE; }
@@ -197,6 +197,29 @@
       </div>
     </div>
 
+    <div id="page-credit" class="cache">
+      <div class="carte">
+        <h2>Demander un credit</h2>
+        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Indique juste le numero de carnet -- le systeme verifie automatiquement si le client est eligible et envoie la demande a valider si c'est le cas.</p>
+        <label>Numero de carnet *</label>
+        <input type="number" id="cr-carnet">
+        <label>Commentaire (optionnel)</label>
+        <input type="text" id="cr-commentaire" placeholder="Ex: client souhaite un credit Dizaine">
+        <button onclick="enregistrerDemandeCredit()">Envoyer la demande</button>
+        <p id="cr-message"></p>
+      </div>
+    </div>
+
+    <div id="page-mes-demandes" class="cache">
+      <div class="carte">
+        <h2>Mes demandes de credit</h2>
+        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Necessite une connexion internet pour voir les statuts a jour.</p>
+        <button onclick="chargerMesDemandes()">Actualiser</button>
+        <div id="liste-mes-demandes" style="margin-top:14px;"></div>
+        <p id="demandes-message"></p>
+      </div>
+    </div>
+
     <div id="page-attente" class="cache">
       <div class="carte">
         <h2>En attente de synchronisation</h2>
@@ -209,9 +232,11 @@
   </main>
 
   <nav>
-    <button id="nav-client" class="actif" onclick="allerA('nouveau-client')">Nouveau client</button>
-    <button id="nav-mise" onclick="allerA('mise')">Saisir mise</button>
-    <button id="nav-attente" onclick="allerA('attente')">En attente</button>
+    <button id="nav-client" class="actif" onclick="allerA('nouveau-client')">Client</button>
+    <button id="nav-mise" onclick="allerA('mise')">Mise</button>
+    <button id="nav-credit" onclick="allerA('credit')">Credit</button>
+    <button id="nav-mes-demandes" onclick="allerA('mes-demandes')">Demandes</button>
+    <button id="nav-attente" onclick="allerA('attente')">Attente</button>
   </nav>
 </div>
 
@@ -220,12 +245,13 @@ const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
 let db;
-const requeteDB = indexedDB.open("imj_mobile", 1);
+const requeteDB = indexedDB.open("imj_mobile", 2);
 requeteDB.onupgradeneeded = (e) => {
   db = e.target.result;
-  db.createObjectStore("session", { keyPath: "cle" });
-  db.createObjectStore("clients", { keyPath: "id_local" });
-  db.createObjectStore("mises", { keyPath: "id_local" });
+  if (!db.objectStoreNames.contains("session")) db.createObjectStore("session", { keyPath: "cle" });
+  if (!db.objectStoreNames.contains("clients")) db.createObjectStore("clients", { keyPath: "id_local" });
+  if (!db.objectStoreNames.contains("mises")) db.createObjectStore("mises", { keyPath: "id_local" });
+  if (!db.objectStoreNames.contains("demandes_credit")) db.createObjectStore("demandes_credit", { keyPath: "id_local" });
 };
 requeteDB.onsuccess = (e) => {
   db = e.target.result;
@@ -344,12 +370,13 @@ function afficherApp(session) {
 }
 
 function allerA(page) {
-  ["nouveau-client", "mise", "attente"].forEach(p => {
+  ["nouveau-client", "mise", "credit", "mes-demandes", "attente"].forEach(p => {
     document.getElementById(`page-${p}`).className = p === page ? "visible" : "cache";
     document.getElementById(`nav-${p === "nouveau-client" ? "client" : p}`).className = p === page ? "actif" : "";
   });
   if (page === "attente") rafraichirListeAttente();
   if (page === "mise") rafraichirListeClientsLocaux();
+  if (page === "mes-demandes") chargerMesDemandes();
 }
 
 document.getElementById("m-mode").addEventListener("change", (e) => {
@@ -474,14 +501,91 @@ async function enregistrerMise() {
   rafraichirListeAttente();
 }
 
+async function enregistrerDemandeCredit() {
+  const carnet = parseInt(document.getElementById("cr-carnet").value);
+  const messageEl = document.getElementById("cr-message");
+  messageEl.className = "erreur";
+
+  if (!carnet) {
+    messageEl.textContent = "Le numero de carnet est obligatoire.";
+    return;
+  }
+
+  const session = await lireObjet("session", "agent");
+  const idLocal = genererUUID();
+
+  const demande = {
+    id_local: idLocal,
+    agent_id: session.code,
+    numero_carnet: carnet,
+    commentaire: document.getElementById("cr-commentaire").value.trim(),
+    date_demande: new Date().toISOString().split("T")[0],
+    created_at: new Date().toISOString(),
+    statut_traitement: "en_attente",
+    synchronise: false
+  };
+
+  await stockerObjet("demandes_credit", demande);
+
+  messageEl.className = "succes";
+  messageEl.textContent = "Demande enregistree localement. Sera envoyee a la prochaine synchronisation.";
+  document.getElementById("cr-carnet").value = "";
+  document.getElementById("cr-commentaire").value = "";
+  rafraichirListeAttente();
+}
+
+async function chargerMesDemandes() {
+  const conteneur = document.getElementById("liste-mes-demandes");
+  const messageEl = document.getElementById("demandes-message");
+  messageEl.className = "";
+  messageEl.textContent = "Chargement...";
+  conteneur.innerHTML = "";
+
+  const session = await lireObjet("session", "agent");
+
+  try {
+    const reponse = await fetch(`${SUPABASE_URL}/rest/v1/demandes_credit_mobile?agent_id=eq.${session.code}&order=created_at.desc&limit=20`, {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` }
+    });
+    const demandes = await reponse.json();
+
+    if (!demandes.length) {
+      messageEl.textContent = "Aucune demande envoyee pour l'instant.";
+      return;
+    }
+
+    messageEl.textContent = "";
+    demandes.forEach(d => {
+      let classeStatut = "badge";
+      let texteStatut = "en attente";
+      if (d.statut_traitement === "verifie") { classeStatut = "badge"; texteStatut = "verifie"; }
+      if (d.statut_traitement === "traite") { classeStatut = "badge ok"; texteStatut = "traite"; }
+      if (d.statut_traitement === "erreur") { classeStatut = "badge"; texteStatut = "erreur"; }
+
+      conteneur.innerHTML += `
+        <div class="ligne-attente" style="flex-direction:column; align-items:flex-start;">
+          <div style="display:flex; justify-content:space-between; width:100%;">
+            <span><b>Carnet ${d.numero_carnet}</b></span>
+            <span class="${classeStatut}">${texteStatut}</span>
+          </div>
+          ${d.resultat_message ? `<span style="font-size:13px; color:#212529; margin-top:4px;">${d.resultat_message}</span>` : ""}
+        </div>`;
+    });
+  } catch (erreur) {
+    messageEl.className = "erreur";
+    messageEl.textContent = "Impossible de charger (verifie ta connexion internet).";
+  }
+}
+
 async function rafraichirListeAttente() {
   const clients = (await listerObjets("clients")).filter(c => !c.synchronise);
   const mises = (await listerObjets("mises")).filter(m => !m.synchronise);
+  const demandesCredit = (await listerObjets("demandes_credit")).filter(d => !d.synchronise);
   const conteneur = document.getElementById("liste-attente");
   const rienEl = document.getElementById("rien-attente");
 
   conteneur.innerHTML = "";
-  const total = clients.length + mises.length;
+  const total = clients.length + mises.length + demandesCredit.length;
   rienEl.style.display = total === 0 ? "block" : "none";
 
   clients.forEach(c => {
@@ -490,6 +594,9 @@ async function rafraichirListeAttente() {
   mises.forEach(m => {
     const cible = m.numero_carnet ? `carnet ${m.numero_carnet}` : "nouveau client (en attente de numero)";
     conteneur.innerHTML += `<div class="ligne-attente"><span>Mise ${cible} : ${m.montant_unitaire * m.nombre_mise} F</span><span class="badge">en attente</span></div>`;
+  });
+  demandesCredit.forEach(d => {
+    conteneur.innerHTML += `<div class="ligne-attente"><span>Demande credit carnet ${d.numero_carnet}</span><span class="badge">en attente</span></div>`;
   });
 }
 
@@ -557,6 +664,31 @@ async function synchroniser() {
       }
     } catch (e) {
       detailsErreurs.push(`Mise (carnet ${mise.numero_carnet || "nouveau client"}) : erreur reseau -- ${e.message}`);
+      echecs++;
+    }
+  }
+
+  const demandesCredit = (await listerObjets("demandes_credit")).filter(d => !d.synchronise);
+  for (const demande of demandesCredit) {
+    const corps = { ...demande };
+    delete corps.synchronise;
+    try {
+      const reponse = await fetch(`${SUPABASE_URL}/rest/v1/demandes_credit_mobile?on_conflict=id_local`, {
+        method: "POST",
+        headers: { ...headers, Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify(corps)
+      });
+      if (reponse.ok) {
+        demande.synchronise = true;
+        await stockerObjet("demandes_credit", demande);
+        envoyes++;
+      } else {
+        const texteErreur = await reponse.text();
+        detailsErreurs.push(`Demande credit (carnet ${demande.numero_carnet}) : HTTP ${reponse.status} -- ${texteErreur.slice(0, 200)}`);
+        echecs++;
+      }
+    } catch (e) {
+      detailsErreurs.push(`Demande credit (carnet ${demande.numero_carnet}) : erreur reseau -- ${e.message}`);
       echecs++;
     }
   }
