@@ -133,7 +133,25 @@
         <label>Quartier</label>
         <input type="text" id="nc-quartier">
         <label>Profession</label>
-        <input type="text" id="nc-profession">
+        <select id="nc-profession">
+          <option value="Commercant(e)">Commercant(e)</option>
+          <option value="Couturier(ere)">Couturier(ere)</option>
+          <option value="Enseignant(e)">Enseignant(e)</option>
+          <option value="Tailleur">Tailleur</option>
+          <option value="Coiffeur(se)">Coiffeur(se)</option>
+          <option value="Etudiant(e)">Etudiant(e)</option>
+          <option value="Revendeur(se)">Revendeur(se)</option>
+          <option value="Agriculteur(trice)">Agriculteur(trice)</option>
+          <option value="Artisan(e)">Artisan(e)</option>
+          <option value="Chauffeur">Chauffeur</option>
+          <option value="Macon">Macon</option>
+          <option value="Mecanicien(ne)">Mecanicien(ne)</option>
+          <option value="Boulanger(ere)">Boulanger(ere)</option>
+          <option value="Restaurateur(trice)">Restaurateur(trice)</option>
+          <option value="Fonctionnaire">Fonctionnaire</option>
+          <option value="Sans emploi">Sans emploi</option>
+          <option value="Autre">Autre</option>
+        </select>
         <label>Type de carnet</label>
         <select id="nc-type">
           <option value="ordinaire">Ordinaire</option>
@@ -396,7 +414,8 @@ async function enregistrerClient() {
 
   messageEl.className = "succes";
   messageEl.textContent = "Client enregistre localement. Sera synchronise plus tard.";
-  ["nc-nom", "nc-prenom", "nc-telephone", "nc-quartier", "nc-profession", "nc-mise"].forEach(id => document.getElementById(id).value = "");
+  ["nc-nom", "nc-prenom", "nc-telephone", "nc-quartier", "nc-mise"].forEach(id => document.getElementById(id).value = "");
+  document.getElementById("nc-profession").selectedIndex = 0;
   rafraichirListeAttente();
   rafraichirListeClientsLocaux();
 }
