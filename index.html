@@ -229,6 +229,16 @@
         <p id="sync-message"></p>
       </div>
     </div>
+
+    <div id="page-mon-rapport" class="cache">
+      <div class="carte">
+        <h2>Mon rapport</h2>
+        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Affiche ton dernier rapport traite (generalement celui de la veille). Necessite une connexion internet.</p>
+        <button onclick="chargerMonRapport()">Actualiser</button>
+        <div id="contenu-mon-rapport" style="margin-top:14px;"></div>
+        <p id="rapport-message"></p>
+      </div>
+    </div>
   </main>
 
   <nav>
@@ -236,6 +246,7 @@
     <button id="nav-mise" onclick="allerA('mise')">Mise</button>
     <button id="nav-credit" onclick="allerA('credit')">Credit</button>
     <button id="nav-mes-demandes" onclick="allerA('mes-demandes')">Demandes</button>
+    <button id="nav-mon-rapport" onclick="allerA('mon-rapport')">Rapport</button>
     <button id="nav-attente" onclick="allerA('attente')">Attente</button>
   </nav>
 </div>
@@ -370,13 +381,14 @@ function afficherApp(session) {
 }
 
 function allerA(page) {
-  ["nouveau-client", "mise", "credit", "mes-demandes", "attente"].forEach(p => {
+  ["nouveau-client", "mise", "credit", "mes-demandes", "mon-rapport", "attente"].forEach(p => {
     document.getElementById(`page-${p}`).className = p === page ? "visible" : "cache";
     document.getElementById(`nav-${p === "nouveau-client" ? "client" : p}`).className = p === page ? "actif" : "";
   });
   if (page === "attente") rafraichirListeAttente();
   if (page === "mise") rafraichirListeClientsLocaux();
   if (page === "mes-demandes") chargerMesDemandes();
+  if (page === "mon-rapport") chargerMonRapport();
 }
 
 document.getElementById("m-mode").addEventListener("change", (e) => {
@@ -577,7 +589,40 @@ async function chargerMesDemandes() {
   }
 }
 
-async function rafraichirListeAttente() {
+async function chargerMonRapport() {
+  const conteneur = document.getElementById("contenu-mon-rapport");
+  const messageEl = document.getElementById("rapport-message");
+  messageEl.className = "";
+  messageEl.textContent = "Chargement...";
+  conteneur.innerHTML = "";
+
+  const session = await lireObjet("session", "agent");
+
+  try {
+    const reponse = await fetch(`${SUPABASE_URL}/rest/v1/rapports_agents_mobile?agent_id=eq.${session.code}&order=date_rapport.desc&limit=1`, {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` }
+    });
+    const rapports = await reponse.json();
+
+    if (!rapports.length) {
+      messageEl.textContent = "Aucun rapport disponible pour l'instant (repasse apres la prochaine synchronisation du bureau).";
+      return;
+    }
+
+    const r = rapports[0];
+    messageEl.textContent = "";
+    conteneur.innerHTML = `
+      <div class="ligne-attente"><span>Date</span><span><b>${r.date_rapport}</b></span></div>
+      <div class="ligne-attente"><span>Total collecte</span><span><b>${r.total_collecte} F</b></span></div>
+      <div class="ligne-attente"><span>Fiches traitees</span><span><b>${r.nombre_fiches}</b></span></div>
+      <div class="ligne-attente"><span>Mises gagnees (nouveaux clients)</span><span><b>${r.mises_gagnees_nombre} -- ${r.mises_gagnees_total} F</b></span></div>
+      <div class="ligne-attente"><span>Interets prets collectes</span><span><b>${r.interets_prets_collectes} F</b></span></div>
+    `;
+  } catch (erreur) {
+    messageEl.className = "erreur";
+    messageEl.textContent = "Impossible de charger (verifie ta connexion internet).";
+  }
+}
   const clients = (await listerObjets("clients")).filter(c => !c.synchronise);
   const mises = (await listerObjets("mises")).filter(m => !m.synchronise);
   const demandesCredit = (await listerObjets("demandes_credit")).filter(d => !d.synchronise);
