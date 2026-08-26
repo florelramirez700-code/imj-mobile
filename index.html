@@ -168,7 +168,13 @@
         <label>Mise de depart (F) *</label>
         <input type="number" id="nc-mise">
         <label style="margin-top:16px; font-weight:600; color:#0548B3;">Photo du client (optionnel)</label>
-        <input type="file" accept="image/*" id="nc-photo">
+        <div style="display:flex; gap:10px;">
+          <input type="file" accept="image/*" capture="environment" id="nc-photo-camera" style="display:none;">
+          <input type="file" accept="image/*" id="nc-photo-galerie" style="display:none;">
+          <button type="button" class="secondaire" style="width:auto; flex:1;" onclick="document.getElementById('nc-photo-camera').click()">Prendre une photo</button>
+          <button type="button" class="secondaire" style="width:auto; flex:1;" onclick="document.getElementById('nc-photo-galerie').click()">Choisir dans la galerie</button>
+        </div>
+        <p id="nc-photo-nom" style="font-size:12px; color:#4A4A4A; margin-top:4px;"></p>
         <label style="margin-top:16px; font-weight:600; color:#0548B3;">Tuteur/Parent (si client mineur)</label>
         <label>Nom du tuteur/parent</label>
         <input type="text" id="nc-nom-tuteur">
@@ -445,7 +451,7 @@ async function enregistrerClient() {
   const session = await lireObjet("session", "agent");
   const idLocal = genererUUID();
 
-  const fichierPhoto = document.getElementById("nc-photo").files[0] || null;
+  const fichierPhoto = document.getElementById("nc-photo-camera").files[0] || document.getElementById("nc-photo-galerie").files[0] || null;
 
   const client = {
     id_local: idLocal,
@@ -474,11 +480,20 @@ async function enregistrerClient() {
   messageEl.className = "succes";
   messageEl.textContent = "Client enregistre localement. Sera synchronise plus tard.";
   ["nc-nom", "nc-prenom", "nc-telephone", "nc-quartier", "nc-mise", "nc-nom-tuteur", "nc-telephone-tuteur", "nc-lien-parente"].forEach(id => document.getElementById(id).value = "");
-  document.getElementById("nc-photo").value = "";
+  document.getElementById("nc-photo-camera").value = "";
+  document.getElementById("nc-photo-galerie").value = "";
+  document.getElementById("nc-photo-nom").textContent = "";
   document.getElementById("nc-profession").selectedIndex = 0;
   rafraichirListeAttente();
   rafraichirListeClientsLocaux();
 }
+
+document.getElementById("nc-photo-camera").addEventListener("change", (e) => {
+  if (e.target.files[0]) document.getElementById("nc-photo-nom").textContent = "Photo prise : " + e.target.files[0].name;
+});
+document.getElementById("nc-photo-galerie").addEventListener("change", (e) => {
+  if (e.target.files[0]) document.getElementById("nc-photo-nom").textContent = "Photo choisie : " + e.target.files[0].name;
+});
 
 async function televerserPhoto(blob, nomFichier) {
   const url = `${SUPABASE_URL}/storage/v1/object/photos_clients/${nomFichier}`;
