@@ -167,6 +167,8 @@
         </select>
         <label>Mise de depart (F) *</label>
         <input type="number" id="nc-mise">
+        <label style="margin-top:16px; font-weight:600; color:#0548B3;">Photo du client (optionnel)</label>
+        <input type="file" accept="image/*" id="nc-photo">
         <label style="margin-top:16px; font-weight:600; color:#0548B3;">Tuteur/Parent (si client mineur)</label>
         <label>Nom du tuteur/parent</label>
         <input type="text" id="nc-nom-tuteur">
@@ -443,6 +445,8 @@ async function enregistrerClient() {
   const session = await lireObjet("session", "agent");
   const idLocal = genererUUID();
 
+  const fichierPhoto = document.getElementById("nc-photo").files[0] || null;
+
   const client = {
     id_local: idLocal,
     agent_id: session.code,
@@ -457,6 +461,8 @@ async function enregistrerClient() {
     nom_tuteur: document.getElementById("nc-nom-tuteur").value.trim() || null,
     telephone_tuteur: document.getElementById("nc-telephone-tuteur").value.trim() || null,
     lien_parente_tuteur: document.getElementById("nc-lien-parente").value.trim() || null,
+    photo_blob: fichierPhoto,
+    photo_url: null,
     date_creation: new Date().toISOString().split("T")[0],
     created_at: new Date().toISOString(),
     statut_import: "en_attente",
@@ -468,9 +474,28 @@ async function enregistrerClient() {
   messageEl.className = "succes";
   messageEl.textContent = "Client enregistre localement. Sera synchronise plus tard.";
   ["nc-nom", "nc-prenom", "nc-telephone", "nc-quartier", "nc-mise", "nc-nom-tuteur", "nc-telephone-tuteur", "nc-lien-parente"].forEach(id => document.getElementById(id).value = "");
+  document.getElementById("nc-photo").value = "";
   document.getElementById("nc-profession").selectedIndex = 0;
   rafraichirListeAttente();
   rafraichirListeClientsLocaux();
+}
+
+async function televerserPhoto(blob, nomFichier) {
+  const url = `${SUPABASE_URL}/storage/v1/object/photos_clients/${nomFichier}`;
+  const reponse = await fetch(url, {
+    method: "POST",
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      "Content-Type": blob.type || "image/jpeg"
+    },
+    body: blob
+  });
+  if (!reponse.ok) {
+    const texteErreur = await reponse.text();
+    throw new Error(`Echec upload photo : ${reponse.status} -- ${texteErreur.slice(0, 150)}`);
+  }
+  return `${SUPABASE_URL}/storage/v1/object/public/photos_clients/${nomFichier}`;
 }
 
 async function enregistrerMise() {
@@ -705,8 +730,19 @@ async function synchroniser() {
 
   const clients = (await listerObjets("clients")).filter(c => !c.synchronise);
   for (const client of clients) {
+    try {
+      if (client.photo_blob && !client.photo_url) {
+        const nomFichier = `${client.id_local}.jpg`;
+        client.photo_url = await televerserPhoto(client.photo_blob, nomFichier);
+        await stockerObjet("clients", client);
+      }
+    } catch (e) {
+      detailsErreurs.push(`Photo client ${client.nom} : ${e.message}`);
+    }
+
     const corps = { ...client };
     delete corps.synchronise;
+    delete corps.photo_blob;
     try {
       const reponse = await fetch(`${SUPABASE_URL}/rest/v1/clients_mobile?on_conflict=id_local`, {
         method: "POST",
