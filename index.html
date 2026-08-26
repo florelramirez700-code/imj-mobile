@@ -164,6 +164,13 @@
         </select>
         <label>Mise de depart (F) *</label>
         <input type="number" id="nc-mise">
+        <label style="margin-top:16px; font-weight:600; color:#0548B3;">Tuteur/Parent (si client mineur)</label>
+        <label>Nom du tuteur/parent</label>
+        <input type="text" id="nc-nom-tuteur">
+        <label>Telephone du tuteur</label>
+        <input type="tel" id="nc-telephone-tuteur">
+        <label>Lien de parente</label>
+        <input type="text" id="nc-lien-parente" placeholder="Pere, mere, tuteur legal...">
         <button onclick="enregistrerClient()">Enregistrer le client</button>
         <p id="nc-message"></p>
       </div>
@@ -444,6 +451,9 @@ async function enregistrerClient() {
     type_carnet: document.getElementById("nc-type").value,
     categorie: document.getElementById("nc-categorie").value,
     mise_depart: mise,
+    nom_tuteur: document.getElementById("nc-nom-tuteur").value.trim() || null,
+    telephone_tuteur: document.getElementById("nc-telephone-tuteur").value.trim() || null,
+    lien_parente_tuteur: document.getElementById("nc-lien-parente").value.trim() || null,
     date_creation: new Date().toISOString().split("T")[0],
     created_at: new Date().toISOString(),
     statut_import: "en_attente",
@@ -454,7 +464,7 @@ async function enregistrerClient() {
 
   messageEl.className = "succes";
   messageEl.textContent = "Client enregistre localement. Sera synchronise plus tard.";
-  ["nc-nom", "nc-prenom", "nc-telephone", "nc-quartier", "nc-mise"].forEach(id => document.getElementById(id).value = "");
+  ["nc-nom", "nc-prenom", "nc-telephone", "nc-quartier", "nc-mise", "nc-nom-tuteur", "nc-telephone-tuteur", "nc-lien-parente"].forEach(id => document.getElementById(id).value = "");
   document.getElementById("nc-profession").selectedIndex = 0;
   rafraichirListeAttente();
   rafraichirListeClientsLocaux();
