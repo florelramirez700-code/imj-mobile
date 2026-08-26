@@ -256,13 +256,14 @@ const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
 let db;
-const requeteDB = indexedDB.open("imj_mobile", 2);
+const requeteDB = indexedDB.open("imj_mobile", 3);
 requeteDB.onupgradeneeded = (e) => {
   db = e.target.result;
   if (!db.objectStoreNames.contains("session")) db.createObjectStore("session", { keyPath: "cle" });
   if (!db.objectStoreNames.contains("clients")) db.createObjectStore("clients", { keyPath: "id_local" });
   if (!db.objectStoreNames.contains("mises")) db.createObjectStore("mises", { keyPath: "id_local" });
   if (!db.objectStoreNames.contains("demandes_credit")) db.createObjectStore("demandes_credit", { keyPath: "id_local" });
+  if (!db.objectStoreNames.contains("confirmations_remise")) db.createObjectStore("confirmations_remise", { keyPath: "id_local" });
 };
 requeteDB.onsuccess = (e) => {
   db = e.target.result;
@@ -574,6 +575,9 @@ async function chargerMesDemandes() {
       if (d.statut_traitement === "traite") { classeStatut = "badge ok"; texteStatut = "traite"; }
       if (d.statut_traitement === "erreur") { classeStatut = "badge"; texteStatut = "erreur"; }
 
+      const estApprouvee = d.resultat_message && d.resultat_message.includes("Approuvee") && d.credit_demande_ids;
+      const premierCreditId = estApprouvee ? d.credit_demande_ids.split(",")[0].trim() : null;
+
       conteneur.innerHTML += `
         <div class="ligne-attente" style="flex-direction:column; align-items:flex-start;">
           <div style="display:flex; justify-content:space-between; width:100%;">
@@ -581,12 +585,32 @@ async function chargerMesDemandes() {
             <span class="${classeStatut}">${texteStatut}</span>
           </div>
           ${d.resultat_message ? `<span style="font-size:13px; color:#212529; margin-top:4px;">${d.resultat_message}</span>` : ""}
+          ${estApprouvee ? `<button style="margin-top:8px;" onclick="confirmerRemise('${d.id_local}', ${premierCreditId})">Confirmer la remise au client</button>` : ""}
         </div>`;
     });
   } catch (erreur) {
     messageEl.className = "erreur";
     messageEl.textContent = "Impossible de charger (verifie ta connexion internet).";
   }
+}
+
+async function confirmerRemise(idLocalDemande, creditId) {
+  const session = await lireObjet("session", "agent");
+  const idLocal = genererUUID();
+
+  const confirmation = {
+    id_local: idLocal,
+    agent_id: session.code,
+    credit_id: creditId,
+    date_confirmation: new Date().toISOString().split("T")[0],
+    created_at: new Date().toISOString(),
+    statut_import: "en_attente",
+    synchronise: false
+  };
+
+  await stockerObjet("confirmations_remise", confirmation);
+  alert("Confirmation enregistree localement. Sera synchronisee vers le bureau.");
+  rafraichirListeAttente();
 }
 
 async function chargerMonRapport() {
@@ -628,11 +652,12 @@ async function rafraichirListeAttente() {
   const clients = (await listerObjets("clients")).filter(c => !c.synchronise);
   const mises = (await listerObjets("mises")).filter(m => !m.synchronise);
   const demandesCredit = (await listerObjets("demandes_credit")).filter(d => !d.synchronise);
+  const confirmationsRemise = (await listerObjets("confirmations_remise")).filter(c => !c.synchronise);
   const conteneur = document.getElementById("liste-attente");
   const rienEl = document.getElementById("rien-attente");
 
   conteneur.innerHTML = "";
-  const total = clients.length + mises.length + demandesCredit.length;
+  const total = clients.length + mises.length + demandesCredit.length + confirmationsRemise.length;
   rienEl.style.display = total === 0 ? "block" : "none";
 
   clients.forEach(c => {
@@ -644,6 +669,9 @@ async function rafraichirListeAttente() {
   });
   demandesCredit.forEach(d => {
     conteneur.innerHTML += `<div class="ligne-attente"><span>Demande credit carnet ${d.numero_carnet}</span><span class="badge">en attente</span></div>`;
+  });
+  confirmationsRemise.forEach(c => {
+    conteneur.innerHTML += `<div class="ligne-attente"><span>Confirmation remise credit #${c.credit_id}</span><span class="badge">en attente</span></div>`;
   });
 }
 
@@ -736,6 +764,31 @@ async function synchroniser() {
       }
     } catch (e) {
       detailsErreurs.push(`Demande credit (carnet ${demande.numero_carnet}) : erreur reseau -- ${e.message}`);
+      echecs++;
+    }
+  }
+
+  const confirmationsRemise = (await listerObjets("confirmations_remise")).filter(c => !c.synchronise);
+  for (const confirmation of confirmationsRemise) {
+    const corps = { ...confirmation };
+    delete corps.synchronise;
+    try {
+      const reponse = await fetch(`${SUPABASE_URL}/rest/v1/confirmations_remise_mobile?on_conflict=id_local`, {
+        method: "POST",
+        headers: { ...headers, Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify(corps)
+      });
+      if (reponse.ok) {
+        confirmation.synchronise = true;
+        await stockerObjet("confirmations_remise", confirmation);
+        envoyes++;
+      } else {
+        const texteErreur = await reponse.text();
+        detailsErreurs.push(`Confirmation remise credit #${confirmation.credit_id} : HTTP ${reponse.status} -- ${texteErreur.slice(0, 200)}`);
+        echecs++;
+      }
+    } catch (e) {
+      detailsErreurs.push(`Confirmation remise credit #${confirmation.credit_id} : erreur reseau -- ${e.message}`);
       echecs++;
     }
   }
