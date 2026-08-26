@@ -623,6 +623,8 @@ async function chargerMonRapport() {
     messageEl.textContent = "Impossible de charger (verifie ta connexion internet).";
   }
 }
+
+async function rafraichirListeAttente() {
   const clients = (await listerObjets("clients")).filter(c => !c.synchronise);
   const mises = (await listerObjets("mises")).filter(m => !m.synchronise);
   const demandesCredit = (await listerObjets("demandes_credit")).filter(d => !d.synchronise);
