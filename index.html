@@ -257,6 +257,16 @@
         <p id="rapport-message"></p>
       </div>
     </div>
+
+    <div id="page-mes-retards" class="cache">
+      <div class="carte">
+        <h2>Mes clients en retard</h2>
+        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Liste mise a jour a chaque passage du pont (toutes les heures environ).</p>
+        <button onclick="chargerMesRetards()">Actualiser</button>
+        <div id="liste-retards" style="margin-top:14px;"></div>
+        <p id="retards-message"></p>
+      </div>
+    </div>
   </main>
 
   <nav>
@@ -265,6 +275,7 @@
     <button id="nav-credit" onclick="allerA('credit')">Credit</button>
     <button id="nav-mes-demandes" onclick="allerA('mes-demandes')">Demandes</button>
     <button id="nav-mon-rapport" onclick="allerA('mon-rapport')">Rapport</button>
+    <button id="nav-mes-retards" onclick="allerA('mes-retards')">Retards</button>
     <button id="nav-attente" onclick="allerA('attente')">Attente</button>
   </nav>
 </div>
@@ -400,7 +411,7 @@ function afficherApp(session) {
 }
 
 function allerA(page) {
-  ["nouveau-client", "mise", "credit", "mes-demandes", "mon-rapport", "attente"].forEach(p => {
+  ["nouveau-client", "mise", "credit", "mes-demandes", "mon-rapport", "mes-retards", "attente"].forEach(p => {
     document.getElementById(`page-${p}`).className = p === page ? "visible" : "cache";
     document.getElementById(`nav-${p === "nouveau-client" ? "client" : p}`).className = p === page ? "actif" : "";
   });
@@ -408,6 +419,7 @@ function allerA(page) {
   if (page === "mise") rafraichirListeClientsLocaux();
   if (page === "mes-demandes") chargerMesDemandes();
   if (page === "mon-rapport") chargerMonRapport();
+  if (page === "mes-retards") chargerMesRetards();
 }
 
 document.getElementById("m-mode").addEventListener("change", (e) => {
@@ -695,6 +707,44 @@ async function chargerMonRapport() {
       <div class="ligne-attente"><span>Mises gagnees (nouveaux clients)</span><span><b>${r.mises_gagnees_nombre} -- ${r.mises_gagnees_total} F</b></span></div>
       <div class="ligne-attente"><span>Interets prets collectes</span><span><b>${r.interets_prets_collectes} F</b></span></div>
     `;
+  } catch (erreur) {
+    messageEl.className = "erreur";
+    messageEl.textContent = "Impossible de charger (verifie ta connexion internet).";
+  }
+}
+
+async function chargerMesRetards() {
+  const conteneur = document.getElementById("liste-retards");
+  const messageEl = document.getElementById("retards-message");
+  messageEl.className = "";
+  messageEl.textContent = "Chargement...";
+  conteneur.innerHTML = "";
+
+  const session = await lireObjet("session", "agent");
+
+  try {
+    const reponse = await fetch(`${SUPABASE_URL}/rest/v1/retards_agents_mobile?agent_id=eq.${session.code}&order=jours_retard.desc`, {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` }
+    });
+    const retards = await reponse.json();
+
+    if (!retards.length) {
+      messageEl.className = "succes";
+      messageEl.textContent = "Aucun client en retard. Bon travail !";
+      return;
+    }
+
+    messageEl.textContent = "";
+    retards.forEach(r => {
+      conteneur.innerHTML += `
+        <div class="ligne-attente" style="flex-direction:column; align-items:flex-start;">
+          <div style="display:flex; justify-content:space-between; width:100%;">
+            <span><b>Carnet ${r.numero_carnet}</b> -- ${r.nom_client}</span>
+            <span class="badge" style="background:#FEE2E2; color:#991B1B;">${r.jours_retard} j</span>
+          </div>
+          <span style="font-size:13px; color:#212529; margin-top:4px;">${r.type_produit} -- Solde restant : ${r.solde_restant} F</span>
+        </div>`;
+    });
   } catch (erreur) {
     messageEl.className = "erreur";
     messageEl.textContent = "Impossible de charger (verifie ta connexion internet).";
