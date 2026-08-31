@@ -80,6 +80,7 @@
     background: white;
     border-top: 1px solid #E4E9F0;
     display: flex;
+    overflow-x: auto;
   }
   nav button {
     flex: 1;
@@ -88,8 +89,9 @@
     margin: 0;
     border-radius: 0;
     padding: 10px 2px;
-    font-size: 11px;
+    font-size: 10.5px;
     font-weight: 500;
+    min-width: 60px;
   }
   nav button.actif { color: #005FDE; }
 </style>
@@ -152,6 +154,14 @@
           <option value="Boulanger(ere)">Boulanger(ere)</option>
           <option value="Restaurateur(trice)">Restaurateur(trice)</option>
           <option value="Fonctionnaire">Fonctionnaire</option>
+          <option value="Menuisier(ere)">Menuisier(ere)</option>
+          <option value="Electricien(ne)">Electricien(ne)</option>
+          <option value="Plombier(ere)">Plombier(ere)</option>
+          <option value="Teinturier(ere)">Teinturier(ere)</option>
+          <option value="Photographe">Photographe</option>
+          <option value="Cordonnier(ere)">Cordonnier(ere)</option>
+          <option value="Poissonnier(ere)">Poissonnier(ere)</option>
+          <option value="Blanchisseur(se)">Blanchisseur(se)</option>
           <option value="Sans emploi">Sans emploi</option>
           <option value="Autre">Autre</option>
         </select>
@@ -210,6 +220,7 @@
         <input type="number" id="m-montant">
         <label>Nombre de mises</label>
         <input type="number" id="m-nombre" value="1">
+        <p id="m-rappel-fin-cycle" style="font-size:12px; color:#E99A0C; font-weight:600; margin-top:10px; padding:10px; background:#FFF7E6; border-radius:8px;"></p>
         <button onclick="enregistrerMise()">Enregistrer la mise</button>
         <p id="m-message"></p>
       </div>
@@ -246,6 +257,13 @@
         <button onclick="synchroniser()">Synchroniser maintenant</button>
         <p id="sync-message"></p>
       </div>
+      <div class="carte">
+        <h2>Dernieres mises traitees</h2>
+        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Necessite une connexion internet. Verifie ici si une nouvelle page a ete ouverte automatiquement (avec sa date de fin a noter dans le carnet du client).</p>
+        <button onclick="chargerHistoriqueMises()">Actualiser</button>
+        <div id="liste-historique-mises" style="margin-top:14px;"></div>
+        <p id="historique-mises-message"></p>
+      </div>
     </div>
 
     <div id="page-mon-rapport" class="cache">
@@ -255,6 +273,19 @@
         <button onclick="chargerMonRapport()">Actualiser</button>
         <div id="contenu-mon-rapport" style="margin-top:14px;"></div>
         <p id="rapport-message"></p>
+      </div>
+    </div>
+
+    <div id="page-fermeture" class="cache">
+      <div class="carte">
+        <h2>Fermer un cycle (client qui arrete)</h2>
+        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Pour un client qui souhaite s'arreter volontairement avant la fin naturelle de sa page. Le solde sera calcule au bureau.</p>
+        <label>Numero de carnet *</label>
+        <input type="number" id="fc-carnet">
+        <label>Motif (optionnel)</label>
+        <input type="text" id="fc-motif" placeholder="Ex: client part du quartier">
+        <button onclick="enregistrerFermetureVolontaire()">Enregistrer la fermeture</button>
+        <p id="fc-message"></p>
       </div>
     </div>
 
@@ -275,6 +306,7 @@
     <button id="nav-credit" onclick="allerA('credit')">Credit</button>
     <button id="nav-mes-demandes" onclick="allerA('mes-demandes')">Demandes</button>
     <button id="nav-mon-rapport" onclick="allerA('mon-rapport')">Rapport</button>
+    <button id="nav-fermeture" onclick="allerA('fermeture')">Fermer</button>
     <button id="nav-mes-retards" onclick="allerA('mes-retards')">Retards</button>
     <button id="nav-attente" onclick="allerA('attente')">Attente</button>
   </nav>
@@ -285,7 +317,7 @@ const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
 let db;
-const requeteDB = indexedDB.open("imj_mobile", 3);
+const requeteDB = indexedDB.open("imj_mobile", 4);
 requeteDB.onupgradeneeded = (e) => {
   db = e.target.result;
   if (!db.objectStoreNames.contains("session")) db.createObjectStore("session", { keyPath: "cle" });
@@ -293,6 +325,7 @@ requeteDB.onupgradeneeded = (e) => {
   if (!db.objectStoreNames.contains("mises")) db.createObjectStore("mises", { keyPath: "id_local" });
   if (!db.objectStoreNames.contains("demandes_credit")) db.createObjectStore("demandes_credit", { keyPath: "id_local" });
   if (!db.objectStoreNames.contains("confirmations_remise")) db.createObjectStore("confirmations_remise", { keyPath: "id_local" });
+  if (!db.objectStoreNames.contains("fermetures_volontaires")) db.createObjectStore("fermetures_volontaires", { keyPath: "id_local" });
 };
 requeteDB.onsuccess = (e) => {
   db = e.target.result;
@@ -411,11 +444,11 @@ function afficherApp(session) {
 }
 
 function allerA(page) {
-  ["nouveau-client", "mise", "credit", "mes-demandes", "mon-rapport", "mes-retards", "attente"].forEach(p => {
+  ["nouveau-client", "mise", "credit", "mes-demandes", "mon-rapport", "fermeture", "mes-retards", "attente"].forEach(p => {
     document.getElementById(`page-${p}`).className = p === page ? "visible" : "cache";
     document.getElementById(`nav-${p === "nouveau-client" ? "client" : p}`).className = p === page ? "actif" : "";
   });
-  if (page === "attente") rafraichirListeAttente();
+  if (page === "attente") { rafraichirListeAttente(); chargerHistoriqueMises(); }
   if (page === "mise") rafraichirListeClientsLocaux();
   if (page === "mes-demandes") chargerMesDemandes();
   if (page === "mon-rapport") chargerMonRapport();
@@ -523,6 +556,17 @@ async function televerserPhoto(blob, nomFichier) {
     throw new Error(`Echec upload photo : ${reponse.status} -- ${texteErreur.slice(0, 150)}`);
   }
   return `${SUPABASE_URL}/storage/v1/object/public/photos_clients/${nomFichier}`;
+}
+
+function afficherRappelFinCycle() {
+  const aujourdhui = new Date();
+  const dateFin = new Date(aujourdhui);
+  dateFin.setDate(dateFin.getDate() + 30);
+  const dateFinTexte = dateFin.toLocaleDateString("fr-FR");
+  const el = document.getElementById("m-rappel-fin-cycle");
+  if (el) {
+    el.textContent = `Si c'est le debut d'une nouvelle page aujourd'hui, elle se terminera le ${dateFinTexte} -- note cette date dans le carnet du client si c'est le cas.`;
+  }
 }
 
 async function enregistrerMise() {
@@ -678,6 +722,39 @@ async function confirmerRemise(idLocalDemande, creditId) {
   rafraichirListeAttente();
 }
 
+async function enregistrerFermetureVolontaire() {
+  const carnet = parseInt(document.getElementById("fc-carnet").value);
+  const messageEl = document.getElementById("fc-message");
+  messageEl.className = "erreur";
+
+  if (!carnet) {
+    messageEl.textContent = "Le numero de carnet est obligatoire.";
+    return;
+  }
+
+  const session = await lireObjet("session", "agent");
+  const idLocal = genererUUID();
+
+  const fermeture = {
+    id_local: idLocal,
+    agent_id: session.code,
+    numero_carnet: carnet,
+    motif: document.getElementById("fc-motif").value.trim(),
+    date_demande: new Date().toISOString().split("T")[0],
+    created_at: new Date().toISOString(),
+    statut_import: "en_attente",
+    synchronise: false
+  };
+
+  await stockerObjet("fermetures_volontaires", fermeture);
+
+  messageEl.className = "succes";
+  messageEl.textContent = "Demande de fermeture enregistree localement. Sera traitee a la prochaine synchronisation.";
+  document.getElementById("fc-carnet").value = "";
+  document.getElementById("fc-motif").value = "";
+  rafraichirListeAttente();
+}
+
 async function chargerMonRapport() {
   const conteneur = document.getElementById("contenu-mon-rapport");
   const messageEl = document.getElementById("rapport-message");
@@ -751,16 +828,56 @@ async function chargerMesRetards() {
   }
 }
 
+async function chargerHistoriqueMises() {
+  const conteneur = document.getElementById("liste-historique-mises");
+  const messageEl = document.getElementById("historique-mises-message");
+  messageEl.className = "";
+  messageEl.textContent = "Chargement...";
+  conteneur.innerHTML = "";
+
+  const session = await lireObjet("session", "agent");
+
+  try {
+    const reponse = await fetch(`${SUPABASE_URL}/rest/v1/mises_mobile?agent_id=eq.${session.code}&statut_import=eq.importe&order=date_import.desc&limit=15`, {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` }
+    });
+    const mises = await reponse.json();
+
+    if (!mises.length) {
+      messageEl.textContent = "Aucune mise traitee pour l'instant.";
+      return;
+    }
+
+    messageEl.textContent = "";
+    mises.forEach(m => {
+      const cible = m.numero_carnet ? `Carnet ${m.numero_carnet}` : "Nouveau client";
+      const estNouvellePage = m.resultat_message && m.resultat_message.includes("Nouvelle page ouverte");
+      conteneur.innerHTML += `
+        <div class="ligne-attente" style="flex-direction:column; align-items:flex-start;">
+          <div style="display:flex; justify-content:space-between; width:100%;">
+            <span><b>${cible}</b></span>
+            <span class="badge ok">traite</span>
+          </div>
+          ${m.resultat_message ? `<span style="font-size:13px; color:${estNouvellePage ? "#E99A0C" : "#212529"}; margin-top:4px; font-weight:${estNouvellePage ? "600" : "400"};">${m.resultat_message}</span>` : ""}
+        </div>`;
+    });
+  } catch (erreur) {
+    messageEl.className = "erreur";
+    messageEl.textContent = "Impossible de charger (verifie ta connexion internet).";
+  }
+}
+
 async function rafraichirListeAttente() {
   const clients = (await listerObjets("clients")).filter(c => !c.synchronise);
   const mises = (await listerObjets("mises")).filter(m => !m.synchronise);
   const demandesCredit = (await listerObjets("demandes_credit")).filter(d => !d.synchronise);
   const confirmationsRemise = (await listerObjets("confirmations_remise")).filter(c => !c.synchronise);
+  const fermeturesVolontaires = (await listerObjets("fermetures_volontaires")).filter(f => !f.synchronise);
   const conteneur = document.getElementById("liste-attente");
   const rienEl = document.getElementById("rien-attente");
 
   conteneur.innerHTML = "";
-  const total = clients.length + mises.length + demandesCredit.length + confirmationsRemise.length;
+  const total = clients.length + mises.length + demandesCredit.length + confirmationsRemise.length + fermeturesVolontaires.length;
   rienEl.style.display = total === 0 ? "block" : "none";
 
   clients.forEach(c => {
@@ -775,6 +892,9 @@ async function rafraichirListeAttente() {
   });
   confirmationsRemise.forEach(c => {
     conteneur.innerHTML += `<div class="ligne-attente"><span>Confirmation remise credit #${c.credit_id}</span><span class="badge">en attente</span></div>`;
+  });
+  fermeturesVolontaires.forEach(f => {
+    conteneur.innerHTML += `<div class="ligne-attente"><span>Fermeture volontaire carnet ${f.numero_carnet}</span><span class="badge">en attente</span></div>`;
   });
 }
 
@@ -829,9 +949,6 @@ async function synchroniser() {
     }
   }
 
-  // On envoie d'abord les CLIENTS, puis les MISES -- important pour que le pont
-  // ait le temps d'importer les clients avant que les mises liees (via
-  // id_local_client) arrivent, sinon elles echoueraient (numero pas encore assigne).
   const mises = (await listerObjets("mises")).filter(m => !m.synchronise);
   for (const mise of mises) {
     const corps = { ...mise };
@@ -907,6 +1024,31 @@ async function synchroniser() {
     }
   }
 
+  const fermeturesVolontaires = (await listerObjets("fermetures_volontaires")).filter(f => !f.synchronise);
+  for (const fermeture of fermeturesVolontaires) {
+    const corps = { ...fermeture };
+    delete corps.synchronise;
+    try {
+      const reponse = await fetch(`${SUPABASE_URL}/rest/v1/fermetures_volontaires_mobile?on_conflict=id_local`, {
+        method: "POST",
+        headers: { ...headers, Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify(corps)
+      });
+      if (reponse.ok) {
+        fermeture.synchronise = true;
+        await stockerObjet("fermetures_volontaires", fermeture);
+        envoyes++;
+      } else {
+        const texteErreur = await reponse.text();
+        detailsErreurs.push(`Fermeture carnet ${fermeture.numero_carnet} : HTTP ${reponse.status} -- ${texteErreur.slice(0, 200)}`);
+        echecs++;
+      }
+    } catch (e) {
+      detailsErreurs.push(`Fermeture carnet ${fermeture.numero_carnet} : erreur reseau -- ${e.message}`);
+      echecs++;
+    }
+  }
+
   messageEl.className = echecs === 0 ? "succes" : "erreur";
   let texteResume = `${envoyes} element(s) synchronise(s), ${echecs} echec(s).`;
   if (detailsErreurs.length > 0) {
@@ -915,6 +1057,8 @@ async function synchroniser() {
   messageEl.innerHTML = texteResume;
   rafraichirListeAttente();
 }
+
+afficherRappelFinCycle();
 </script>
 </body>
 </html>
