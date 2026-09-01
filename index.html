@@ -327,11 +327,6 @@
           <input type="text" id="rh-quartier">
           <label>Profession</label>
           <input type="text" id="rh-profession">
-          <label>Type de carnet</label>
-          <select id="rh-type-carnet">
-            <option value="ordinaire">Ordinaire</option>
-            <option value="bloque">Bloque</option>
-          </select>
           <label>Categorie</label>
           <select id="rh-categorie">
             <option value="senior">Senior</option>
@@ -341,19 +336,37 @@
 
         <label style="margin-top:16px; font-weight:600; color:#0548B3;">Numero de carnet *</label>
         <input type="number" id="rh-numero-carnet">
+        <p id="rh-carnet-actuel" style="font-size:13px; color:#0D581A; font-weight:600; margin-top:4px;"></p>
+        <button type="button" class="secondaire" onclick="changerDeCarnet()" style="margin-top:4px;">Changer de carnet (nouveau numero)</button>
+
+        <label style="margin-top:16px; font-weight:600; color:#0548B3;">Type de ce carnet *</label>
+        <select id="rh-type-carnet-reprise">
+          <option value="ordinaire">Ordinaire</option>
+          <option value="bloque">Bloque</option>
+        </select>
 
         <label style="margin-top:16px; font-weight:600; color:#0548B3;">Infos du cycle</label>
         <label>Date de debut du cycle *</label>
         <input type="date" id="rh-date-debut">
         <label>Mise journaliere (F) *</label>
         <input type="number" id="rh-mise">
-        <label>Position actuelle (0 a 31) *</label>
-        <input type="number" id="rh-position" min="0" max="31">
-        <label>Statut du cycle</label>
-        <select id="rh-statut">
-          <option value="en_cours">En cours</option>
-          <option value="cloture_complete">Retire / Termine</option>
-        </select>
+
+        <div id="rh-bloc-ordinaire">
+          <label>Position actuelle (0 a 31) *</label>
+          <input type="number" id="rh-position" min="0" max="31">
+          <label>Statut du cycle</label>
+          <select id="rh-statut">
+            <option value="en_cours">En cours</option>
+            <option value="cloture_complete">Termine (pas retire)</option>
+            <option value="cloture_retrait">Retire (deja donne)</option>
+          </select>
+        </div>
+
+        <div id="rh-bloc-bloque" class="cache">
+          <label>Montant verse pendant cette periode (F) *</label>
+          <input type="number" id="rh-montant-verse">
+          <p style="font-size:12px; color:#9B9CA1; margin-top:4px;">Pour un bloque, tu peux ajouter plusieurs periodes successives sur le meme carnet (une par agent/segment) -- le logiciel enchaine automatiquement la position a partir d'ou le dernier segment s'est arrete.</p>
+        </div>
 
         <button onclick="enregistrerRepriseHistorique()">Enregistrer</button>
         <p id="rh-message"></p>
@@ -895,22 +908,40 @@ async function enregistrerNouveauCarnetClientExistant() {
   rafraichirListeAttente();
 }
 
+document.getElementById("rh-type-carnet-reprise").addEventListener("change", (e) => {
+  const estBloque = e.target.value === "bloque";
+  document.getElementById("rh-bloc-ordinaire").className = estBloque ? "cache" : "visible";
+  document.getElementById("rh-bloc-bloque").className = estBloque ? "visible" : "cache";
+});
+
+function changerDeCarnet() {
+  document.getElementById("rh-numero-carnet").value = "";
+  document.getElementById("rh-numero-carnet").disabled = false;
+  document.getElementById("rh-type-carnet-reprise").disabled = false;
+  document.getElementById("rh-type-carnet-reprise").value = "ordinaire";
+  document.getElementById("rh-bloc-ordinaire").className = "visible";
+  document.getElementById("rh-bloc-bloque").className = "cache";
+  document.getElementById("rh-carnet-actuel").textContent = "";
+  document.getElementById("rh-mode").value = "carnet_existant";
+  document.getElementById("rh-bloc-nouveau-client").className = "cache";
+  document.getElementById("rh-date-debut").value = "";
+  document.getElementById("rh-mise").value = "";
+  document.getElementById("rh-position").value = "";
+  document.getElementById("rh-statut").value = "en_cours";
+  document.getElementById("rh-montant-verse").value = "";
+}
+
 async function enregistrerRepriseHistorique() {
   const mode = document.getElementById("rh-mode").value;
   const numeroCarnet = parseInt(document.getElementById("rh-numero-carnet").value);
+  const typeCarnetReprise = document.getElementById("rh-type-carnet-reprise").value;
   const dateDebut = document.getElementById("rh-date-debut").value;
   const mise = parseInt(document.getElementById("rh-mise").value);
-  const position = parseInt(document.getElementById("rh-position").value);
-  const statut = document.getElementById("rh-statut").value;
   const messageEl = document.getElementById("rh-message");
   messageEl.className = "erreur";
 
-  if (!numeroCarnet || !dateDebut || !mise || position === "" || isNaN(position)) {
-    messageEl.textContent = "Numero de carnet, date de debut, mise et position sont obligatoires.";
-    return;
-  }
-  if (position < 0 || position > 31) {
-    messageEl.textContent = "La position doit etre entre 0 et 31.";
+  if (!numeroCarnet || !dateDebut || !mise) {
+    messageEl.textContent = "Numero de carnet, date de debut et mise sont obligatoires.";
     return;
   }
 
@@ -922,14 +953,35 @@ async function enregistrerRepriseHistorique() {
     agent_id: session.code,
     mode: mode,
     numero_carnet: numeroCarnet,
+    type_carnet_reprise: typeCarnetReprise,
     date_debut_cycle: dateDebut,
     mise_journaliere: mise,
-    position_actuelle: position,
-    statut_cycle: statut,
     created_at: new Date().toISOString(),
     statut_import: "en_attente",
     synchronise: false
   };
+
+  if (typeCarnetReprise === "bloque") {
+    const montantVerse = parseInt(document.getElementById("rh-montant-verse").value);
+    if (!montantVerse || montantVerse <= 0) {
+      messageEl.textContent = "Le montant verse pendant cette periode est obligatoire pour un bloque.";
+      return;
+    }
+    reprise.montant_verse_periode = montantVerse;
+  } else {
+    const position = parseInt(document.getElementById("rh-position").value);
+    const statut = document.getElementById("rh-statut").value;
+    if (position === "" || isNaN(position)) {
+      messageEl.textContent = "La position actuelle est obligatoire pour un carnet ordinaire.";
+      return;
+    }
+    if (position < 0 || position > 31) {
+      messageEl.textContent = "La position doit etre entre 0 et 31.";
+      return;
+    }
+    reprise.position_actuelle = position;
+    reprise.statut_cycle = statut;
+  }
 
   if (mode === "nouveau_client") {
     const nom = document.getElementById("rh-nom").value.trim();
@@ -943,19 +995,28 @@ async function enregistrerRepriseHistorique() {
     reprise.telephone = telephone;
     reprise.quartier = document.getElementById("rh-quartier").value.trim();
     reprise.profession = document.getElementById("rh-profession").value.trim();
-    reprise.type_carnet = document.getElementById("rh-type-carnet").value;
+    reprise.type_carnet = typeCarnetReprise;
     reprise.categorie = document.getElementById("rh-categorie").value;
   }
 
   await stockerObjet("reprises_historiques", reprise);
 
   messageEl.className = "succes";
-  messageEl.textContent = "Reprise historique enregistree localement. Sera traitee a la prochaine synchronisation.";
-  document.getElementById("rh-numero-carnet").value = "";
+  const numeroPourAffichage = numeroCarnet;
+  messageEl.textContent = `Enregistre. Pour ajouter un AUTRE cycle sur ce meme carnet, remplis juste les champs cycle ci-dessous et enregistre a nouveau.`;
+  document.getElementById("rh-carnet-actuel").textContent = `Carnet actuel : ${numeroPourAffichage} (${typeCarnetReprise}) -- utilise "Changer de carnet" pour un autre numero`;
+  document.getElementById("rh-numero-carnet").disabled = true;
+  document.getElementById("rh-type-carnet-reprise").disabled = true;
+
   document.getElementById("rh-date-debut").value = "";
   document.getElementById("rh-mise").value = "";
   document.getElementById("rh-position").value = "";
+  document.getElementById("rh-statut").value = "en_cours";
+  document.getElementById("rh-montant-verse").value = "";
+
   if (mode === "nouveau_client") {
+    document.getElementById("rh-mode").value = "carnet_existant";
+    document.getElementById("rh-bloc-nouveau-client").className = "cache";
     document.getElementById("rh-nom").value = "";
     document.getElementById("rh-prenom").value = "";
     document.getElementById("rh-telephone").value = "";
