@@ -276,6 +276,90 @@
       </div>
     </div>
 
+    <div id="page-client-existant" class="cache">
+      <div class="carte">
+        <h2>Ajouter un carnet (client existant)</h2>
+        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Pour un client qui a deja un dossier chez IMJ (un carnet supplementaire). Necessite une connexion internet pour la recherche.</p>
+        <label>Telephone du client *</label>
+        <input type="tel" id="ce-telephone">
+        <button onclick="chercherClientExistant()">Chercher</button>
+        <p id="ce-recherche-message"></p>
+        <div id="ce-resultat" class="cache">
+          <label style="margin-top:16px; font-weight:600; color:#0548B3;">Client trouve</label>
+          <p id="ce-nom-trouve" style="font-size:15px; margin:6px 0 14px;"></p>
+          <label>Type de carnet</label>
+          <select id="ce-type">
+            <option value="ordinaire">Ordinaire</option>
+            <option value="bloque">Bloque</option>
+          </select>
+          <label>Categorie</label>
+          <select id="ce-categorie">
+            <option value="senior">Senior</option>
+            <option value="junior">Junior</option>
+          </select>
+          <label>Mise de depart (F) *</label>
+          <input type="number" id="ce-mise">
+          <button onclick="enregistrerNouveauCarnetClientExistant()">Ajouter ce carnet</button>
+          <p id="ce-message"></p>
+        </div>
+      </div>
+    </div>
+
+    <div id="page-reprise" class="cache">
+      <div class="carte">
+        <h2>Reprise historique</h2>
+        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Enregistre les infos brutes d'un cycle deja existant (papier, avant le logiciel). Traite au bureau apres synchronisation -- les calculs de credit se font separement.</p>
+        <label>Pour qui ?</label>
+        <select id="rh-mode">
+          <option value="carnet_existant">Carnet deja dans le logiciel</option>
+          <option value="nouveau_client">Nouveau client (jamais enregistre)</option>
+        </select>
+
+        <div id="rh-bloc-nouveau-client" class="cache">
+          <label style="margin-top:16px; font-weight:600; color:#0548B3;">Infos du nouveau client</label>
+          <label>Nom *</label>
+          <input type="text" id="rh-nom">
+          <label>Prenom</label>
+          <input type="text" id="rh-prenom">
+          <label>Telephone *</label>
+          <input type="tel" id="rh-telephone">
+          <label>Quartier</label>
+          <input type="text" id="rh-quartier">
+          <label>Profession</label>
+          <input type="text" id="rh-profession">
+          <label>Type de carnet</label>
+          <select id="rh-type-carnet">
+            <option value="ordinaire">Ordinaire</option>
+            <option value="bloque">Bloque</option>
+          </select>
+          <label>Categorie</label>
+          <select id="rh-categorie">
+            <option value="senior">Senior</option>
+            <option value="junior">Junior</option>
+          </select>
+        </div>
+
+        <label style="margin-top:16px; font-weight:600; color:#0548B3;">Numero de carnet *</label>
+        <input type="number" id="rh-numero-carnet">
+
+        <label style="margin-top:16px; font-weight:600; color:#0548B3;">Infos du cycle</label>
+        <label>Date de debut du cycle *</label>
+        <input type="date" id="rh-date-debut">
+        <label>Mise journaliere (F) *</label>
+        <input type="number" id="rh-mise">
+        <label>Position actuelle (0 a 31) *</label>
+        <input type="number" id="rh-position" min="0" max="31">
+        <label>Statut du cycle</label>
+        <select id="rh-statut">
+          <option value="en_cours">En cours</option>
+          <option value="cloture_complete">Retire / Termine</option>
+        </select>
+
+        <button onclick="enregistrerRepriseHistorique()">Enregistrer</button>
+        <p id="rh-message"></p>
+      </div>
+    </div>
+
     <div id="page-fermeture" class="cache">
       <div class="carte">
         <h2>Fermer un cycle (client qui arrete)</h2>
@@ -306,6 +390,8 @@
     <button id="nav-credit" onclick="allerA('credit')">Credit</button>
     <button id="nav-mes-demandes" onclick="allerA('mes-demandes')">Demandes</button>
     <button id="nav-mon-rapport" onclick="allerA('mon-rapport')">Rapport</button>
+    <button id="nav-client-existant" onclick="allerA('client-existant')">+Carnet</button>
+    <button id="nav-reprise" onclick="allerA('reprise')">Reprise</button>
     <button id="nav-fermeture" onclick="allerA('fermeture')">Fermer</button>
     <button id="nav-mes-retards" onclick="allerA('mes-retards')">Retards</button>
     <button id="nav-attente" onclick="allerA('attente')">Attente</button>
@@ -317,7 +403,7 @@ const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
 let db;
-const requeteDB = indexedDB.open("imj_mobile", 4);
+const requeteDB = indexedDB.open("imj_mobile", 6);
 requeteDB.onupgradeneeded = (e) => {
   db = e.target.result;
   if (!db.objectStoreNames.contains("session")) db.createObjectStore("session", { keyPath: "cle" });
@@ -326,6 +412,8 @@ requeteDB.onupgradeneeded = (e) => {
   if (!db.objectStoreNames.contains("demandes_credit")) db.createObjectStore("demandes_credit", { keyPath: "id_local" });
   if (!db.objectStoreNames.contains("confirmations_remise")) db.createObjectStore("confirmations_remise", { keyPath: "id_local" });
   if (!db.objectStoreNames.contains("fermetures_volontaires")) db.createObjectStore("fermetures_volontaires", { keyPath: "id_local" });
+  if (!db.objectStoreNames.contains("nouveaux_carnets")) db.createObjectStore("nouveaux_carnets", { keyPath: "id_local" });
+  if (!db.objectStoreNames.contains("reprises_historiques")) db.createObjectStore("reprises_historiques", { keyPath: "id_local" });
 };
 requeteDB.onsuccess = (e) => {
   db = e.target.result;
@@ -444,7 +532,7 @@ function afficherApp(session) {
 }
 
 function allerA(page) {
-  ["nouveau-client", "mise", "credit", "mes-demandes", "mon-rapport", "fermeture", "mes-retards", "attente"].forEach(p => {
+  ["nouveau-client", "mise", "credit", "mes-demandes", "mon-rapport", "client-existant", "reprise", "fermeture", "mes-retards", "attente"].forEach(p => {
     document.getElementById(`page-${p}`).className = p === page ? "visible" : "cache";
     document.getElementById(`nav-${p === "nouveau-client" ? "client" : p}`).className = p === page ? "actif" : "";
   });
@@ -722,6 +810,161 @@ async function confirmerRemise(idLocalDemande, creditId) {
   rafraichirListeAttente();
 }
 
+document.getElementById("rh-mode").addEventListener("change", (e) => {
+  const estNouveau = e.target.value === "nouveau_client";
+  document.getElementById("rh-bloc-nouveau-client").className = estNouveau ? "visible" : "cache";
+});
+
+let clientExistantTrouve = null;
+
+async function chercherClientExistant() {
+  const telephone = document.getElementById("ce-telephone").value.trim();
+  const messageEl = document.getElementById("ce-recherche-message");
+  const resultatDiv = document.getElementById("ce-resultat");
+  messageEl.className = "";
+  messageEl.textContent = "Recherche...";
+  resultatDiv.className = "cache";
+  clientExistantTrouve = null;
+
+  if (!telephone) {
+    messageEl.className = "erreur";
+    messageEl.textContent = "Le telephone est obligatoire.";
+    return;
+  }
+
+  try {
+    const reponse = await fetch(`${SUPABASE_URL}/rest/v1/clients_recherche_mobile?telephone=eq.${encodeURIComponent(telephone)}`, {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` }
+    });
+    const resultats = await reponse.json();
+
+    if (!resultats.length) {
+      messageEl.className = "erreur";
+      messageEl.textContent = "Aucun client trouve avec ce telephone. Verifie le numero, ou cree-le comme nouveau client.";
+      return;
+    }
+
+    clientExistantTrouve = resultats[0];
+    messageEl.textContent = "";
+    document.getElementById("ce-nom-trouve").textContent = `${clientExistantTrouve.nom} ${clientExistantTrouve.prenom || ""} -- ${clientExistantTrouve.telephone}`;
+    resultatDiv.className = "visible";
+  } catch (erreur) {
+    messageEl.className = "erreur";
+    messageEl.textContent = "Impossible de chercher (verifie ta connexion internet).";
+  }
+}
+
+async function enregistrerNouveauCarnetClientExistant() {
+  const mise = parseInt(document.getElementById("ce-mise").value);
+  const messageEl = document.getElementById("ce-message");
+  messageEl.className = "erreur";
+
+  if (!clientExistantTrouve) {
+    messageEl.textContent = "Cherche d'abord un client.";
+    return;
+  }
+  if (!mise) {
+    messageEl.textContent = "La mise de depart est obligatoire.";
+    return;
+  }
+
+  const session = await lireObjet("session", "agent");
+  const idLocal = genererUUID();
+
+  const nouveauCarnet = {
+    id_local: idLocal,
+    agent_id: session.code,
+    telephone_client: clientExistantTrouve.telephone,
+    type_carnet: document.getElementById("ce-type").value,
+    categorie: document.getElementById("ce-categorie").value,
+    mise_depart: mise,
+    date_demande: new Date().toISOString().split("T")[0],
+    created_at: new Date().toISOString(),
+    statut_import: "en_attente",
+    synchronise: false
+  };
+
+  await stockerObjet("nouveaux_carnets", nouveauCarnet);
+
+  messageEl.className = "succes";
+  messageEl.textContent = "Demande enregistree localement. Sera traitee a la prochaine synchronisation.";
+  document.getElementById("ce-mise").value = "";
+  document.getElementById("ce-telephone").value = "";
+  document.getElementById("ce-resultat").className = "cache";
+  clientExistantTrouve = null;
+  rafraichirListeAttente();
+}
+
+async function enregistrerRepriseHistorique() {
+  const mode = document.getElementById("rh-mode").value;
+  const numeroCarnet = parseInt(document.getElementById("rh-numero-carnet").value);
+  const dateDebut = document.getElementById("rh-date-debut").value;
+  const mise = parseInt(document.getElementById("rh-mise").value);
+  const position = parseInt(document.getElementById("rh-position").value);
+  const statut = document.getElementById("rh-statut").value;
+  const messageEl = document.getElementById("rh-message");
+  messageEl.className = "erreur";
+
+  if (!numeroCarnet || !dateDebut || !mise || position === "" || isNaN(position)) {
+    messageEl.textContent = "Numero de carnet, date de debut, mise et position sont obligatoires.";
+    return;
+  }
+  if (position < 0 || position > 31) {
+    messageEl.textContent = "La position doit etre entre 0 et 31.";
+    return;
+  }
+
+  const session = await lireObjet("session", "agent");
+  const idLocal = genererUUID();
+
+  const reprise = {
+    id_local: idLocal,
+    agent_id: session.code,
+    mode: mode,
+    numero_carnet: numeroCarnet,
+    date_debut_cycle: dateDebut,
+    mise_journaliere: mise,
+    position_actuelle: position,
+    statut_cycle: statut,
+    created_at: new Date().toISOString(),
+    statut_import: "en_attente",
+    synchronise: false
+  };
+
+  if (mode === "nouveau_client") {
+    const nom = document.getElementById("rh-nom").value.trim();
+    const telephone = document.getElementById("rh-telephone").value.trim();
+    if (!nom || !telephone) {
+      messageEl.textContent = "Nom et telephone sont obligatoires pour un nouveau client.";
+      return;
+    }
+    reprise.nom = nom;
+    reprise.prenom = document.getElementById("rh-prenom").value.trim();
+    reprise.telephone = telephone;
+    reprise.quartier = document.getElementById("rh-quartier").value.trim();
+    reprise.profession = document.getElementById("rh-profession").value.trim();
+    reprise.type_carnet = document.getElementById("rh-type-carnet").value;
+    reprise.categorie = document.getElementById("rh-categorie").value;
+  }
+
+  await stockerObjet("reprises_historiques", reprise);
+
+  messageEl.className = "succes";
+  messageEl.textContent = "Reprise historique enregistree localement. Sera traitee a la prochaine synchronisation.";
+  document.getElementById("rh-numero-carnet").value = "";
+  document.getElementById("rh-date-debut").value = "";
+  document.getElementById("rh-mise").value = "";
+  document.getElementById("rh-position").value = "";
+  if (mode === "nouveau_client") {
+    document.getElementById("rh-nom").value = "";
+    document.getElementById("rh-prenom").value = "";
+    document.getElementById("rh-telephone").value = "";
+    document.getElementById("rh-quartier").value = "";
+    document.getElementById("rh-profession").value = "";
+  }
+  rafraichirListeAttente();
+}
+
 async function enregistrerFermetureVolontaire() {
   const carnet = parseInt(document.getElementById("fc-carnet").value);
   const messageEl = document.getElementById("fc-message");
@@ -873,11 +1116,13 @@ async function rafraichirListeAttente() {
   const demandesCredit = (await listerObjets("demandes_credit")).filter(d => !d.synchronise);
   const confirmationsRemise = (await listerObjets("confirmations_remise")).filter(c => !c.synchronise);
   const fermeturesVolontaires = (await listerObjets("fermetures_volontaires")).filter(f => !f.synchronise);
+  const nouveauxCarnets = (await listerObjets("nouveaux_carnets")).filter(n => !n.synchronise);
+  const reprisesHistoriques = (await listerObjets("reprises_historiques")).filter(r => !r.synchronise);
   const conteneur = document.getElementById("liste-attente");
   const rienEl = document.getElementById("rien-attente");
 
   conteneur.innerHTML = "";
-  const total = clients.length + mises.length + demandesCredit.length + confirmationsRemise.length + fermeturesVolontaires.length;
+  const total = clients.length + mises.length + demandesCredit.length + confirmationsRemise.length + fermeturesVolontaires.length + nouveauxCarnets.length + reprisesHistoriques.length;
   rienEl.style.display = total === 0 ? "block" : "none";
 
   clients.forEach(c => {
@@ -895,6 +1140,12 @@ async function rafraichirListeAttente() {
   });
   fermeturesVolontaires.forEach(f => {
     conteneur.innerHTML += `<div class="ligne-attente"><span>Fermeture volontaire carnet ${f.numero_carnet}</span><span class="badge">en attente</span></div>`;
+  });
+  nouveauxCarnets.forEach(n => {
+    conteneur.innerHTML += `<div class="ligne-attente"><span>Nouveau carnet pour ${n.telephone_client}</span><span class="badge">en attente</span></div>`;
+  });
+  reprisesHistoriques.forEach(r => {
+    conteneur.innerHTML += `<div class="ligne-attente"><span>Reprise historique carnet ${r.numero_carnet}</span><span class="badge">en attente</span></div>`;
   });
 }
 
@@ -1045,6 +1296,56 @@ async function synchroniser() {
       }
     } catch (e) {
       detailsErreurs.push(`Fermeture carnet ${fermeture.numero_carnet} : erreur reseau -- ${e.message}`);
+      echecs++;
+    }
+  }
+
+  const nouveauxCarnets = (await listerObjets("nouveaux_carnets")).filter(n => !n.synchronise);
+  for (const nouveauCarnet of nouveauxCarnets) {
+    const corps = { ...nouveauCarnet };
+    delete corps.synchronise;
+    try {
+      const reponse = await fetch(`${SUPABASE_URL}/rest/v1/nouveaux_carnets_mobile?on_conflict=id_local`, {
+        method: "POST",
+        headers: { ...headers, Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify(corps)
+      });
+      if (reponse.ok) {
+        nouveauCarnet.synchronise = true;
+        await stockerObjet("nouveaux_carnets", nouveauCarnet);
+        envoyes++;
+      } else {
+        const texteErreur = await reponse.text();
+        detailsErreurs.push(`Nouveau carnet pour ${nouveauCarnet.telephone_client} : HTTP ${reponse.status} -- ${texteErreur.slice(0, 200)}`);
+        echecs++;
+      }
+    } catch (e) {
+      detailsErreurs.push(`Nouveau carnet pour ${nouveauCarnet.telephone_client} : erreur reseau -- ${e.message}`);
+      echecs++;
+    }
+  }
+
+  const reprisesHistoriques = (await listerObjets("reprises_historiques")).filter(r => !r.synchronise);
+  for (const reprise of reprisesHistoriques) {
+    const corps = { ...reprise };
+    delete corps.synchronise;
+    try {
+      const reponse = await fetch(`${SUPABASE_URL}/rest/v1/reprise_historique_mobile?on_conflict=id_local`, {
+        method: "POST",
+        headers: { ...headers, Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify(corps)
+      });
+      if (reponse.ok) {
+        reprise.synchronise = true;
+        await stockerObjet("reprises_historiques", reprise);
+        envoyes++;
+      } else {
+        const texteErreur = await reponse.text();
+        detailsErreurs.push(`Reprise historique carnet ${reprise.numero_carnet} : HTTP ${reponse.status} -- ${texteErreur.slice(0, 200)}`);
+        echecs++;
+      }
+    } catch (e) {
+      detailsErreurs.push(`Reprise historique carnet ${reprise.numero_carnet} : erreur reseau -- ${e.message}`);
       echecs++;
     }
   }
