@@ -365,7 +365,9 @@
         <div id="rh-bloc-bloque" class="cache">
           <label>Montant verse pendant cette periode (F) *</label>
           <input type="number" id="rh-montant-verse">
-          <p style="font-size:12px; color:#9B9CA1; margin-top:4px;">Pour un bloque, tu peux ajouter plusieurs periodes successives sur le meme carnet (une par agent/segment) -- le logiciel enchaine automatiquement la position a partir d'ou le dernier segment s'est arrete.</p>
+          <label>Code agent pour CETTE periode (optionnel)</label>
+          <input type="text" id="rh-agent-periode" placeholder="Laisse vide pour utiliser ton propre code">
+          <p style="font-size:12px; color:#9B9CA1; margin-top:4px;">Pour un bloque, tu peux ajouter plusieurs periodes successives sur le meme carnet (une par agent/segment) -- le logiciel enchaine automatiquement la position a partir d'ou le dernier segment s'est arrete. Si un AUTRE agent que toi a collecte cette periode precise, indique son code ici.</p>
         </div>
 
         <button onclick="enregistrerRepriseHistorique()">Enregistrer</button>
@@ -946,6 +948,7 @@ function changerDeCarnet() {
   document.getElementById("rh-position").value = "";
   document.getElementById("rh-statut").value = "en_cours";
   document.getElementById("rh-montant-verse").value = "";
+  document.getElementById("rh-agent-periode").value = "";
 }
 
 async function enregistrerRepriseHistorique() {
@@ -985,6 +988,10 @@ async function enregistrerRepriseHistorique() {
       return;
     }
     reprise.montant_verse_periode = montantVerse;
+    const agentPeriode = document.getElementById("rh-agent-periode").value.trim();
+    if (agentPeriode) {
+      reprise.agent_id_periode = agentPeriode.toUpperCase();
+    }
   } else {
     const position = parseInt(document.getElementById("rh-position").value);
     const statut = document.getElementById("rh-statut").value;
@@ -1030,6 +1037,7 @@ async function enregistrerRepriseHistorique() {
   document.getElementById("rh-position").value = "";
   document.getElementById("rh-statut").value = "en_cours";
   document.getElementById("rh-montant-verse").value = "";
+  document.getElementById("rh-agent-periode").value = "";
 
   if (mode === "nouveau_client") {
     document.getElementById("rh-mode").value = "carnet_existant";
