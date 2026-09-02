@@ -332,6 +332,8 @@
             <option value="senior">Senior</option>
             <option value="junior">Junior</option>
           </select>
+          <label>Code agent responsable de ce carnet (optionnel)</label>
+          <input type="text" id="rh-agent-responsable" placeholder="Laisse vide pour utiliser ton propre code">
         </div>
 
         <label style="margin-top:16px; font-weight:600; color:#0548B3;">Numero de carnet *</label>
@@ -1021,6 +1023,10 @@ async function enregistrerRepriseHistorique() {
     reprise.profession = document.getElementById("rh-profession").value.trim();
     reprise.type_carnet = typeCarnetReprise;
     reprise.categorie = document.getElementById("rh-categorie").value;
+    const agentResponsable = document.getElementById("rh-agent-responsable").value.trim();
+    if (agentResponsable) {
+      reprise.agent_id_responsable = agentResponsable.toUpperCase();
+    }
   }
 
   await stockerObjet("reprises_historiques", reprise);
@@ -1047,6 +1053,7 @@ async function enregistrerRepriseHistorique() {
     document.getElementById("rh-telephone").value = "";
     document.getElementById("rh-quartier").value = "";
     document.getElementById("rh-profession").value = "";
+    document.getElementById("rh-agent-responsable").value = "";
   }
   rafraichirListeAttente();
 }
