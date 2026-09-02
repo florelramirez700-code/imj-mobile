@@ -373,6 +373,21 @@
       </div>
     </div>
 
+    <div id="page-rattrapage" class="cache">
+      <div class="carte">
+        <h2>Rattrapage</h2>
+        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Pour un carnet DEJA repris dans le logiciel (cycle en cours), quand l'agent a pris des mises sur papier pas encore saisies. Ajoute a la suite du cycle existant, sans le recreer.</p>
+        <label>Numero de carnet *</label>
+        <input type="number" id="rt-numero-carnet">
+        <label>Date du segment *</label>
+        <input type="date" id="rt-date-segment">
+        <label>Nombre de mises a ajouter *</label>
+        <input type="number" id="rt-nombre-mises" min="1">
+        <button onclick="enregistrerRattrapage()">Enregistrer</button>
+        <p id="rt-message"></p>
+      </div>
+    </div>
+
     <div id="page-fermeture" class="cache">
       <div class="carte">
         <h2>Fermer un cycle (client qui arrete)</h2>
@@ -405,6 +420,7 @@
     <button id="nav-mon-rapport" onclick="allerA('mon-rapport')">Rapport</button>
     <button id="nav-client-existant" onclick="allerA('client-existant')">+Carnet</button>
     <button id="nav-reprise" onclick="allerA('reprise')">Reprise</button>
+    <button id="nav-rattrapage" onclick="allerA('rattrapage')">Rattrapage</button>
     <button id="nav-fermeture" onclick="allerA('fermeture')">Fermer</button>
     <button id="nav-mes-retards" onclick="allerA('mes-retards')">Retards</button>
     <button id="nav-attente" onclick="allerA('attente')">Attente</button>
@@ -416,7 +432,7 @@ const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
 let db;
-const requeteDB = indexedDB.open("imj_mobile", 6);
+const requeteDB = indexedDB.open("imj_mobile", 7);
 requeteDB.onupgradeneeded = (e) => {
   db = e.target.result;
   if (!db.objectStoreNames.contains("session")) db.createObjectStore("session", { keyPath: "cle" });
@@ -427,6 +443,7 @@ requeteDB.onupgradeneeded = (e) => {
   if (!db.objectStoreNames.contains("fermetures_volontaires")) db.createObjectStore("fermetures_volontaires", { keyPath: "id_local" });
   if (!db.objectStoreNames.contains("nouveaux_carnets")) db.createObjectStore("nouveaux_carnets", { keyPath: "id_local" });
   if (!db.objectStoreNames.contains("reprises_historiques")) db.createObjectStore("reprises_historiques", { keyPath: "id_local" });
+  if (!db.objectStoreNames.contains("rattrapages")) db.createObjectStore("rattrapages", { keyPath: "id_local" });
 };
 requeteDB.onsuccess = (e) => {
   db = e.target.result;
@@ -545,7 +562,7 @@ function afficherApp(session) {
 }
 
 function allerA(page) {
-  ["nouveau-client", "mise", "credit", "mes-demandes", "mon-rapport", "client-existant", "reprise", "fermeture", "mes-retards", "attente"].forEach(p => {
+  ["nouveau-client", "mise", "credit", "mes-demandes", "mon-rapport", "client-existant", "reprise", "rattrapage", "fermeture", "mes-retards", "attente"].forEach(p => {
     document.getElementById(`page-${p}`).className = p === page ? "visible" : "cache";
     document.getElementById(`nav-${p === "nouveau-client" ? "client" : p}`).className = p === page ? "actif" : "";
   });
@@ -1026,6 +1043,46 @@ async function enregistrerRepriseHistorique() {
   rafraichirListeAttente();
 }
 
+async function enregistrerRattrapage() {
+  const numeroCarnet = parseInt(document.getElementById("rt-numero-carnet").value);
+  const dateSegment = document.getElementById("rt-date-segment").value;
+  const nombreMises = parseInt(document.getElementById("rt-nombre-mises").value);
+  const messageEl = document.getElementById("rt-message");
+  messageEl.className = "erreur";
+
+  if (!numeroCarnet || !dateSegment || !nombreMises) {
+    messageEl.textContent = "Numero de carnet, date et nombre de mises sont obligatoires.";
+    return;
+  }
+  if (nombreMises <= 0) {
+    messageEl.textContent = "Le nombre de mises doit etre superieur a 0.";
+    return;
+  }
+
+  const session = await lireObjet("session", "agent");
+  const idLocal = genererUUID();
+
+  const rattrapage = {
+    id_local: idLocal,
+    agent_id: session.code,
+    numero_carnet: numeroCarnet,
+    date_segment: dateSegment,
+    nombre_mises: nombreMises,
+    created_at: new Date().toISOString(),
+    statut_import: "en_attente",
+    synchronise: false
+  };
+
+  await stockerObjet("rattrapages", rattrapage);
+
+  messageEl.className = "succes";
+  messageEl.textContent = "Rattrapage enregistre localement. Sera traite a la prochaine synchronisation.";
+  document.getElementById("rt-numero-carnet").value = "";
+  document.getElementById("rt-date-segment").value = "";
+  document.getElementById("rt-nombre-mises").value = "";
+  rafraichirListeAttente();
+}
+
 async function enregistrerFermetureVolontaire() {
   const carnet = parseInt(document.getElementById("fc-carnet").value);
   const messageEl = document.getElementById("fc-message");
@@ -1179,11 +1236,12 @@ async function rafraichirListeAttente() {
   const fermeturesVolontaires = (await listerObjets("fermetures_volontaires")).filter(f => !f.synchronise);
   const nouveauxCarnets = (await listerObjets("nouveaux_carnets")).filter(n => !n.synchronise);
   const reprisesHistoriques = (await listerObjets("reprises_historiques")).filter(r => !r.synchronise);
+  const rattrapages = (await listerObjets("rattrapages")).filter(r => !r.synchronise);
   const conteneur = document.getElementById("liste-attente");
   const rienEl = document.getElementById("rien-attente");
 
   conteneur.innerHTML = "";
-  const total = clients.length + mises.length + demandesCredit.length + confirmationsRemise.length + fermeturesVolontaires.length + nouveauxCarnets.length + reprisesHistoriques.length;
+  const total = clients.length + mises.length + demandesCredit.length + confirmationsRemise.length + fermeturesVolontaires.length + nouveauxCarnets.length + reprisesHistoriques.length + rattrapages.length;
   rienEl.style.display = total === 0 ? "block" : "none";
 
   clients.forEach(c => {
@@ -1207,6 +1265,9 @@ async function rafraichirListeAttente() {
   });
   reprisesHistoriques.forEach(r => {
     conteneur.innerHTML += `<div class="ligne-attente"><span>Reprise historique carnet ${r.numero_carnet}</span><span class="badge">en attente</span></div>`;
+  });
+  rattrapages.forEach(r => {
+    conteneur.innerHTML += `<div class="ligne-attente"><span>Rattrapage carnet ${r.numero_carnet} (${r.nombre_mises} mises)</span><span class="badge">en attente</span></div>`;
   });
 }
 
@@ -1407,6 +1468,31 @@ async function synchroniser() {
       }
     } catch (e) {
       detailsErreurs.push(`Reprise historique carnet ${reprise.numero_carnet} : erreur reseau -- ${e.message}`);
+      echecs++;
+    }
+  }
+
+  const rattrapages = (await listerObjets("rattrapages")).filter(r => !r.synchronise);
+  for (const rattrapage of rattrapages) {
+    const corps = { ...rattrapage };
+    delete corps.synchronise;
+    try {
+      const reponse = await fetch(`${SUPABASE_URL}/rest/v1/rattrapage_mobile?on_conflict=id_local`, {
+        method: "POST",
+        headers: { ...headers, Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify(corps)
+      });
+      if (reponse.ok) {
+        rattrapage.synchronise = true;
+        await stockerObjet("rattrapages", rattrapage);
+        envoyes++;
+      } else {
+        const texteErreur = await reponse.text();
+        detailsErreurs.push(`Rattrapage carnet ${rattrapage.numero_carnet} : HTTP ${reponse.status} -- ${texteErreur.slice(0, 200)}`);
+        echecs++;
+      }
+    } catch (e) {
+      detailsErreurs.push(`Rattrapage carnet ${rattrapage.numero_carnet} : erreur reseau -- ${e.message}`);
       echecs++;
     }
   }
