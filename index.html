@@ -436,7 +436,7 @@ const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
 let db;
-const requeteDB = indexedDB.open("imj_mobile", 7);
+const requeteDB = indexedDB.open("imj_mobile", 8);
 requeteDB.onupgradeneeded = (e) => {
   db = e.target.result;
   if (!db.objectStoreNames.contains("session")) db.createObjectStore("session", { keyPath: "cle" });
@@ -603,6 +603,26 @@ async function rafraichirListeClientsLocaux() {
     });
 }
 
+function fichierVersBase64(fichier) {
+  return new Promise((resolve, reject) => {
+    const lecteur = new FileReader();
+    lecteur.onload = () => resolve(lecteur.result);
+    lecteur.onerror = reject;
+    lecteur.readAsDataURL(fichier);
+  });
+}
+
+function base64VersBlob(base64DataUrl) {
+  const parties = base64DataUrl.split(",");
+  const typeMime = parties[0].match(/:(.*?);/)[1];
+  const donneesBinaires = atob(parties[1]);
+  const tableau = new Uint8Array(donneesBinaires.length);
+  for (let i = 0; i < donneesBinaires.length; i++) {
+    tableau[i] = donneesBinaires.charCodeAt(i);
+  }
+  return new Blob([tableau], { type: typeMime });
+}
+
 async function enregistrerClient() {
   const nom = document.getElementById("nc-nom").value.trim();
   const telephone = document.getElementById("nc-telephone").value.trim();
@@ -620,6 +640,19 @@ async function enregistrerClient() {
 
   const fichierPhoto = document.getElementById("nc-photo-camera").files[0] || document.getElementById("nc-photo-galerie").files[0] || null;
 
+  // La photo est convertie en base64 (texte) IMMEDIATEMENT, pas stockee comme
+  // fichier brut -- un fichier brut stocke dans IndexedDB peut se corrompre ou
+  // disparaitre si l'appli est fermee/rouverte avant la synchronisation. Le
+  // texte base64, lui, survit sans probleme.
+  let photoBase64 = null;
+  if (fichierPhoto) {
+    try {
+      photoBase64 = await fichierVersBase64(fichierPhoto);
+    } catch (e) {
+      photoBase64 = null;
+    }
+  }
+
   const client = {
     id_local: idLocal,
     agent_id: session.code,
@@ -634,7 +667,7 @@ async function enregistrerClient() {
     nom_tuteur: document.getElementById("nc-nom-tuteur").value.trim() || null,
     telephone_tuteur: document.getElementById("nc-telephone-tuteur").value.trim() || null,
     lien_parente_tuteur: document.getElementById("nc-lien-parente").value.trim() || null,
-    photo_blob: fichierPhoto,
+    photo_base64: photoBase64,
     photo_url: null,
     date_creation: new Date().toISOString().split("T")[0],
     created_at: new Date().toISOString(),
@@ -1304,9 +1337,10 @@ async function synchroniser() {
   const clients = (await listerObjets("clients")).filter(c => !c.synchronise);
   for (const client of clients) {
     try {
-      if (client.photo_blob && !client.photo_url) {
+      if (client.photo_base64 && !client.photo_url) {
+        const blobPhoto = base64VersBlob(client.photo_base64);
         const nomFichier = `${client.id_local}.jpg`;
-        client.photo_url = await televerserPhoto(client.photo_blob, nomFichier);
+        client.photo_url = await televerserPhoto(blobPhoto, nomFichier);
         await stockerObjet("clients", client);
       }
     } catch (e) {
@@ -1315,7 +1349,7 @@ async function synchroniser() {
 
     const corps = { ...client };
     delete corps.synchronise;
-    delete corps.photo_blob;
+    delete corps.photo_base64;
     try {
       const reponse = await fetch(`${SUPABASE_URL}/rest/v1/clients_mobile?on_conflict=id_local`, {
         method: "POST",
