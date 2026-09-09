@@ -135,6 +135,10 @@
         <input type="text" id="nc-prenom">
         <label>Telephone *</label>
         <input type="tel" id="nc-telephone">
+        <label style="display:flex; align-items:center; gap:6px; margin-top:8px; font-weight:400;">
+          <input type="checkbox" id="nc-pas-de-telephone" style="width:auto;">
+          Le client n'a pas / refuse de donner un telephone
+        </label>
         <label>Quartier</label>
         <input type="text" id="nc-quartier">
         <label>Profession</label>
@@ -536,14 +540,31 @@ function base64VersBlob(base64DataUrl) {
 
 async function enregistrerClient() {
   const nom = document.getElementById("nc-nom").value.trim();
-  const telephone = document.getElementById("nc-telephone").value.trim();
+  const pasDeTelephone = document.getElementById("nc-pas-de-telephone").checked;
+  let telephone = document.getElementById("nc-telephone").value.trim();
   const mise = parseInt(document.getElementById("nc-mise").value);
   const messageEl = document.getElementById("nc-message");
   messageEl.className = "erreur";
 
-  if (!nom || !telephone || !mise) {
-    messageEl.textContent = "Nom, telephone et mise sont obligatoires.";
+  if (!nom || !mise) {
+    messageEl.textContent = "Nom et mise sont obligatoires.";
     return;
+  }
+
+  if (pasDeTelephone) {
+    // Genere un identifiant UNIQUE (pas "-" partage par tout le monde) pour
+    // eviter tout risque de faux-doublon entre 2 clients sans telephone.
+    telephone = "SANS-TEL-" + genererUUID().slice(0, 8).toUpperCase();
+  } else {
+    if (!telephone) {
+      messageEl.textContent = "Le telephone est obligatoire (ou coche la case si le client n'en a pas).";
+      return;
+    }
+    const telephoneNettoye = telephone.replace(/[\s\-.]/g, "");
+    if (telephoneNettoye.length < 6 || !/^[0-9]+$/.test(telephoneNettoye)) {
+      messageEl.textContent = "Telephone invalide. Si le client n'a vraiment aucun telephone, coche la case ci-dessus au lieu de taper '-'.";
+      return;
+    }
   }
 
   const session = await lireObjet("session", "agent");
@@ -587,6 +608,9 @@ async function enregistrerClient() {
   messageEl.className = "succes";
   messageEl.textContent = "Client enregistre localement. Sera synchronise plus tard.";
   ["nc-nom", "nc-prenom", "nc-telephone", "nc-quartier", "nc-mise", "nc-nom-tuteur", "nc-telephone-tuteur", "nc-lien-parente"].forEach(id => document.getElementById(id).value = "");
+  document.getElementById("nc-pas-de-telephone").checked = false;
+  document.getElementById("nc-telephone").disabled = false;
+  document.getElementById("nc-telephone").placeholder = "";
   document.getElementById("nc-photo-camera").value = "";
   document.getElementById("nc-photo-galerie").value = "";
   document.getElementById("nc-photo-nom").textContent = "";
@@ -594,6 +618,18 @@ async function enregistrerClient() {
   rafraichirListeAttente();
   rafraichirListeClientsLocaux();
 }
+
+document.getElementById("nc-pas-de-telephone").addEventListener("change", (e) => {
+  const champTelephone = document.getElementById("nc-telephone");
+  if (e.target.checked) {
+    champTelephone.value = "";
+    champTelephone.disabled = true;
+    champTelephone.placeholder = "Identifiant genere automatiquement";
+  } else {
+    champTelephone.disabled = false;
+    champTelephone.placeholder = "";
+  }
+});
 
 document.getElementById("nc-photo-camera").addEventListener("change", (e) => {
   if (e.target.files[0]) document.getElementById("nc-photo-nom").textContent = "Photo prise : " + e.target.files[0].name;
