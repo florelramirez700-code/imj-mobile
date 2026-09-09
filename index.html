@@ -640,10 +640,6 @@ async function enregistrerClient() {
 
   const fichierPhoto = document.getElementById("nc-photo-camera").files[0] || document.getElementById("nc-photo-galerie").files[0] || null;
 
-  // La photo est convertie en base64 (texte) IMMEDIATEMENT, pas stockee comme
-  // fichier brut -- un fichier brut stocke dans IndexedDB peut se corrompre ou
-  // disparaitre si l'appli est fermee/rouverte avant la synchronisation. Le
-  // texte base64, lui, survit sans probleme.
   let photoBase64 = null;
   if (fichierPhoto) {
     try {
@@ -822,7 +818,8 @@ async function chargerMesDemandes() {
 
   try {
     const reponse = await fetch(`${SUPABASE_URL}/rest/v1/demandes_credit_mobile?agent_id=eq.${session.code}&order=created_at.desc&limit=20`, {
-      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` }
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+      cache: "no-store"
     });
     const demandes = await reponse.json();
 
@@ -901,7 +898,8 @@ async function chercherClientExistant() {
 
   try {
     const reponse = await fetch(`${SUPABASE_URL}/rest/v1/clients_recherche_mobile?telephone=eq.${encodeURIComponent(telephone)}`, {
-      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` }
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+      cache: "no-store"
     });
     const resultats = await reponse.json();
 
@@ -1175,7 +1173,8 @@ async function chargerMonRapport() {
 
   try {
     const reponse = await fetch(`${SUPABASE_URL}/rest/v1/rapports_agents_mobile?agent_id=eq.${session.code}&order=date_rapport.desc&limit=1`, {
-      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` }
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+      cache: "no-store"
     });
     const rapports = await reponse.json();
 
@@ -1210,7 +1209,8 @@ async function chargerMesRetards() {
 
   try {
     const reponse = await fetch(`${SUPABASE_URL}/rest/v1/retards_agents_mobile?agent_id=eq.${session.code}&order=jours_retard.desc`, {
-      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` }
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+      cache: "no-store"
     });
     const retards = await reponse.json();
 
@@ -1248,7 +1248,8 @@ async function chargerHistoriqueMises() {
 
   try {
     const reponse = await fetch(`${SUPABASE_URL}/rest/v1/mises_mobile?agent_id=eq.${session.code}&statut_import=eq.importe&order=date_import.desc&limit=15`, {
-      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` }
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+      cache: "no-store"
     });
     const mises = await reponse.json();
 
