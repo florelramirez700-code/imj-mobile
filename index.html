@@ -411,6 +411,43 @@ async function verifierSessionExistante() {
   }
 }
 
+async function obtenirTokenValide() {
+  const session = await lireObjet("session", "agent");
+  if (!session || !session.access_token) return null;
+
+  const maintenant = Date.now();
+  if (session.expires_at && maintenant < session.expires_at - 60000) {
+    return session.access_token;
+  }
+
+  // Le jeton a expire (ou va bientot expirer) -- on le rafraichit via le
+  // refresh_token, SANS redemander le mot de passe. Necessite internet.
+  try {
+    const reponse = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: "POST",
+      headers: { apikey: SUPABASE_ANON_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: session.refresh_token }),
+    });
+    if (!reponse.ok) return session.access_token; // hors-ligne : on retente avec l'ancien, au pire ca echoue proprement plus loin
+    const donnees = await reponse.json();
+    session.access_token = donnees.access_token;
+    session.refresh_token = donnees.refresh_token;
+    session.expires_at = Date.now() + donnees.expires_in * 1000;
+    await stockerObjet("session", session);
+    return session.access_token;
+  } catch (e) {
+    return session.access_token; // pas de reseau -- on retente avec l'ancien
+  }
+}
+
+async function enTetesAuth() {
+  const token = await obtenirTokenValide();
+  return {
+    apikey: SUPABASE_ANON_KEY,
+    Authorization: `Bearer ${token || SUPABASE_ANON_KEY}`,
+  };
+}
+
 async function seConnecter() {
   const code = document.getElementById("login-code").value.trim().toUpperCase();
   const motDePasse = document.getElementById("login-mdp").value;
@@ -423,41 +460,39 @@ async function seConnecter() {
   }
 
   const sessionExistante = await lireObjet("session", "agent");
-  if (sessionExistante && sessionExistante.code === code) {
-    const hachageSaisi = await hacherMotDePasse(motDePasse);
-    if (hachageSaisi === sessionExistante.mot_de_passe_hash) {
-      afficherApp(sessionExistante);
-      return;
-    } else {
-      messageEl.textContent = "Mot de passe incorrect.";
-      return;
-    }
+  if (sessionExistante && sessionExistante.code === code && sessionExistante.mot_de_passe_verifie === motDePasse) {
+    // Reconnexion hors-ligne : on ne revalide pas le mot de passe aupres du
+    // serveur (impossible sans internet), on fait confiance a la session locale.
+    afficherApp(sessionExistante);
+    return;
   }
 
+  const emailSynthetique = `${code.toLowerCase()}@imj-mobile.local`;
+
   try {
-    const reponse = await fetch(`${SUPABASE_URL}/rest/v1/agents_mobile_auth?code_agent=eq.${code}&select=*`, {
-      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` }
+    const reponse = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+      method: "POST",
+      headers: { apikey: SUPABASE_ANON_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ email: emailSynthetique, password: motDePasse }),
     });
-    const resultats = await reponse.json();
 
-    if (!resultats.length) {
-      messageEl.textContent = "Agent inconnu. Verifie ta connexion internet ou ton code.";
+    if (!reponse.ok) {
+      messageEl.textContent = "Code agent ou mot de passe incorrect.";
       return;
     }
 
-    const agent = resultats[0];
-    if (!agent.actif) {
-      messageEl.textContent = "Ce compte est desactive.";
-      return;
-    }
+    const donnees = await reponse.json();
+    const nomAgent = (donnees.user && donnees.user.user_metadata && donnees.user.user_metadata.nom) || code;
 
-    const hachageSaisi = await hacherMotDePasse(motDePasse);
-    if (hachageSaisi !== agent.mot_de_passe_hash) {
-      messageEl.textContent = "Mot de passe incorrect.";
-      return;
-    }
-
-    const session = { cle: "agent", code: agent.code_agent, nom: agent.nom, mot_de_passe_hash: agent.mot_de_passe_hash };
+    const session = {
+      cle: "agent",
+      code: code,
+      nom: nomAgent,
+      mot_de_passe_verifie: motDePasse,
+      access_token: donnees.access_token,
+      refresh_token: donnees.refresh_token,
+      expires_at: Date.now() + donnees.expires_in * 1000,
+    };
     await stockerObjet("session", session);
     afficherApp(session);
 
@@ -640,11 +675,11 @@ document.getElementById("nc-photo-galerie").addEventListener("change", (e) => {
 
 async function televerserPhoto(blob, nomFichier) {
   const url = `${SUPABASE_URL}/storage/v1/object/photos_clients/${nomFichier}`;
+  const entetesAuth = await enTetesAuth();
   const reponse = await fetch(url, {
     method: "POST",
     headers: {
-      apikey: SUPABASE_ANON_KEY,
-      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      ...entetesAuth,
       "Content-Type": blob.type || "image/jpeg"
     },
     body: blob
@@ -765,7 +800,7 @@ async function chargerMesDemandes() {
 
   try {
     const reponse = await fetch(`${SUPABASE_URL}/rest/v1/demandes_credit_mobile?agent_id=eq.${session.code}&order=created_at.desc&limit=20`, {
-      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+      headers: await enTetesAuth(),
       cache: "no-store"
     });
     const demandes = await reponse.json();
@@ -840,7 +875,7 @@ async function chercherClientExistant() {
 
   try {
     const reponse = await fetch(`${SUPABASE_URL}/rest/v1/clients_recherche_mobile?telephone=eq.${encodeURIComponent(telephone)}`, {
-      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+      headers: await enTetesAuth(),
       cache: "no-store"
     });
     const resultats = await reponse.json();
@@ -946,7 +981,7 @@ async function chargerMonRapport() {
 
   try {
     const reponse = await fetch(`${SUPABASE_URL}/rest/v1/rapports_agents_mobile?agent_id=eq.${session.code}&order=date_rapport.desc&limit=1`, {
-      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+      headers: await enTetesAuth(),
       cache: "no-store"
     });
     const rapports = await reponse.json();
@@ -982,7 +1017,7 @@ async function chargerMesRetards() {
 
   try {
     const reponse = await fetch(`${SUPABASE_URL}/rest/v1/retards_agents_mobile?agent_id=eq.${session.code}&order=jours_retard.desc`, {
-      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+      headers: await enTetesAuth(),
       cache: "no-store"
     });
     const retards = await reponse.json();
@@ -1021,7 +1056,7 @@ async function chargerHistoriqueMises() {
 
   try {
     const reponse = await fetch(`${SUPABASE_URL}/rest/v1/mises_mobile?agent_id=eq.${session.code}&statut_import=eq.importe&order=date_import.desc&limit=15`, {
-      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+      headers: await enTetesAuth(),
       cache: "no-store"
     });
     const mises = await reponse.json();
@@ -1099,8 +1134,7 @@ async function synchroniser() {
   messageEl.textContent = "Synchronisation en cours...";
 
   const headers = {
-    apikey: SUPABASE_ANON_KEY,
-    Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    ...(await enTetesAuth()),
     "Content-Type": "application/json"
   };
 
