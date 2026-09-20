@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>IMJ Mobile</title>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <link rel="manifest" href="manifest.json">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -109,6 +112,7 @@
       <button onclick="seConnecter()">Se connecter</button>
       <p id="login-message" class="erreur"></p>
       <p style="font-size:12px; color:#9B9CA1; margin-top:14px;">La premiere connexion necessite une connexion internet. Ensuite, ca marche hors ligne.</p>
+      <p style="font-size:10px; color:#C0C0C0; margin-top:10px; text-align:center;">Version <span id="version-affichee-connexion"></span></p>
     </div>
   </main>
 </div>
@@ -120,6 +124,7 @@
       <div>
         <h1>IMJ CORE</h1>
         <div class="agent-nom" id="header-nom"></div>
+        <div style="font-size:9px; opacity:0.6; color:white;">Version <span id="version-affichee"></span></div>
       </div>
     </div>
     <button class="secondaire" style="width:auto; padding:6px 12px; font-size:12px;" onclick="seDeconnecter()">Sortir</button>
@@ -166,6 +171,16 @@
           <option value="Cordonnier(ere)">Cordonnier(ere)</option>
           <option value="Poissonnier(ere)">Poissonnier(ere)</option>
           <option value="Blanchisseur(se)">Blanchisseur(se)</option>
+          <option value="Infirmier(ere)">Infirmier(ere)</option>
+          <option value="Cuisinier(ere)">Cuisinier(ere)</option>
+          <option value="Pecheur(se)">Pecheur(se)</option>
+          <option value="Zemidjan">Zemidjan</option>
+          <option value="Soudeur(se)">Soudeur(se)</option>
+          <option value="Vulcanisateur(trice)">Vulcanisateur(trice)</option>
+          <option value="Eleveur(se)">Eleveur(se)</option>
+          <option value="Maraicher(ere)">Maraicher(ere)</option>
+          <option value="Sage-femme">Sage-femme</option>
+          <option value="Vendeur(se) de tissus">Vendeur(se) de tissus</option>
           <option value="Sans emploi">Sans emploi</option>
           <option value="Autre">Autre</option>
         </select>
@@ -347,11 +362,12 @@
 </div>
 
 <script>
+const VERSION_APP = "2026.09.09-1";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
 let db;
-const requeteDB = indexedDB.open("imj_mobile", 8);
+const requeteDB = indexedDB.open("imj_mobile", 9);
 requeteDB.onupgradeneeded = (e) => {
   db = e.target.result;
   if (!db.objectStoreNames.contains("session")) db.createObjectStore("session", { keyPath: "cle" });
@@ -363,6 +379,7 @@ requeteDB.onupgradeneeded = (e) => {
   if (!db.objectStoreNames.contains("nouveaux_carnets")) db.createObjectStore("nouveaux_carnets", { keyPath: "id_local" });
   if (!db.objectStoreNames.contains("reprises_historiques")) db.createObjectStore("reprises_historiques", { keyPath: "id_local" });
   if (!db.objectStoreNames.contains("rattrapages")) db.createObjectStore("rattrapages", { keyPath: "id_local" });
+  if (!db.objectStoreNames.contains("clients_cache")) db.createObjectStore("clients_cache", { keyPath: "telephone" });
 };
 requeteDB.onsuccess = (e) => {
   db = e.target.result;
@@ -858,6 +875,25 @@ async function confirmerRemise(idLocalDemande, creditId) {
 
 let clientExistantTrouve = null;
 
+async function telechargerClientsRecherche() {
+  // Telecharge la liste complete des clients pour la recherche hors ligne de
+  // "+Carnet" -- a appeler a chaque synchronisation (necessite internet),
+  // stocke en cache local pour un usage plus tard sans reseau.
+  try {
+    const reponse = await fetch(`${SUPABASE_URL}/rest/v1/clients_recherche_mobile?select=*`, {
+      headers: await enTetesAuth(),
+      cache: "no-store"
+    });
+    if (!reponse.ok) return;
+    const tousLesClients = await reponse.json();
+    for (const client of tousLesClients) {
+      if (client.telephone) await stockerObjet("clients_cache", client);
+    }
+  } catch (erreur) {
+    // Pas de reseau -- le cache existant (potentiellement plus ancien) reste utilisable.
+  }
+}
+
 async function chercherClientExistant() {
   const telephone = document.getElementById("ce-telephone").value.trim();
   const messageEl = document.getElementById("ce-recherche-message");
@@ -891,6 +927,16 @@ async function chercherClientExistant() {
     document.getElementById("ce-nom-trouve").textContent = `${clientExistantTrouve.nom} ${clientExistantTrouve.prenom || ""} -- ${clientExistantTrouve.telephone}`;
     resultatDiv.className = "visible";
   } catch (erreur) {
+    // Pas de reseau -- on cherche dans la copie locale telechargee lors de la derniere synchronisation.
+    const clientLocal = await lireObjet("clients_cache", telephone);
+    if (clientLocal) {
+      clientExistantTrouve = clientLocal;
+      messageEl.className = "";
+      messageEl.textContent = "(Trouve hors ligne, dans la derniere copie synchronisee)";
+      document.getElementById("ce-nom-trouve").textContent = `${clientLocal.nom} ${clientLocal.prenom || ""} -- ${clientLocal.telephone}`;
+      resultatDiv.className = "visible";
+      return;
+    }
     messageEl.className = "erreur";
     messageEl.textContent = "Impossible de chercher (verifie ta connexion internet).";
   }
@@ -1133,6 +1179,8 @@ async function synchroniser() {
   messageEl.className = "";
   messageEl.textContent = "Synchronisation en cours...";
 
+  await telechargerClientsRecherche();
+
   const headers = {
     ...(await enTetesAuth()),
     "Content-Type": "application/json"
@@ -1362,6 +1410,9 @@ async function synchroniser() {
   messageEl.innerHTML = texteResume;
   rafraichirListeAttente();
 }
+
+document.getElementById("version-affichee-connexion").textContent = VERSION_APP;
+document.getElementById("version-affichee").textContent = VERSION_APP;
 
 afficherRappelFinCycle();
 </script>
