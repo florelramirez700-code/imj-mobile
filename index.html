@@ -537,7 +537,7 @@ function allerA(page) {
     document.getElementById(`page-${p}`).className = p === page ? "visible" : "cache";
     document.getElementById(`nav-${p === "nouveau-client" ? "client" : p}`).className = p === page ? "actif" : "";
   });
-  if (page === "attente") { rafraichirListeAttente(); chargerHistoriqueMises(); }
+  if (page === "attente") { document.getElementById("sync-message").textContent = ""; rafraichirListeAttente(); chargerHistoriqueMises(); }
   if (page === "mise") rafraichirListeClientsLocaux();
   if (page === "mes-demandes") chargerMesDemandes();
   if (page === "mon-rapport") chargerMonRapport();
