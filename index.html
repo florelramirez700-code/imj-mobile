@@ -10,6 +10,9 @@
 <link rel="manifest" href="manifest.json">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    overscroll-behavior-y: contain;
+  }
   body {
     font-family: -apple-system, Segoe UI, Roboto, sans-serif;
     background: #F6F9FB;
@@ -324,6 +327,47 @@
       </div>
     </div>
 
+    <div id="page-vente" class="cache">
+      <div class="carte">
+        <h2>Vente de carnet</h2>
+        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Pour un nouveau carnet vendu sur le terrain, avec ou sans nouveau client rattache.</p>
+        <label>Type de carnet</label>
+        <select id="vc-type">
+          <option value="ordinaire">Ordinaire</option>
+          <option value="bloque">Bloque</option>
+        </select>
+        <label>Categorie</label>
+        <select id="vc-categorie">
+          <option value="senior">Senior</option>
+          <option value="junior">Junior</option>
+        </select>
+        <label>Mise de depart (F) *</label>
+        <input type="number" id="vc-mise">
+        <label>Nom du client *</label>
+        <input type="text" id="vc-nom-client">
+        <label>Prenom</label>
+        <input type="text" id="vc-prenom-client">
+        <label>Telephone</label>
+        <input type="tel" id="vc-telephone-client">
+        <div class="checkbox-ligne">
+          <input type="checkbox" id="vc-pas-de-telephone">
+          <label for="vc-pas-de-telephone">Le client n'a pas / refuse de donner un telephone</label>
+        </div>
+        <button onclick="enregistrerVenteCarnet()">Enregistrer la vente</button>
+        <p id="vc-message"></p>
+      </div>
+    </div>
+
+    <div id="page-mes-penalites" class="cache">
+      <div class="carte">
+        <h2>Mes penalites a recuperer</h2>
+        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Liste mise a jour a chaque passage du pont. Confirme uniquement une fois l'argent reellement recu du client.</p>
+        <button onclick="chargerMesPenalites()">Actualiser</button>
+        <div id="liste-penalites" style="margin-top:14px;"></div>
+        <p id="penalites-message"></p>
+      </div>
+    </div>
+
     <div id="page-fermeture" class="cache">
       <div class="carte">
         <h2>Fermer un cycle (client qui arrete)</h2>
@@ -355,6 +399,8 @@
     <button id="nav-mes-demandes" onclick="allerA('mes-demandes')">Demandes</button>
     <button id="nav-mon-rapport" onclick="allerA('mon-rapport')">Rapport</button>
     <button id="nav-client-existant" onclick="allerA('client-existant')">+Carnet</button>
+    <button id="nav-vente" onclick="allerA('vente')">Vente</button>
+    <button id="nav-mes-penalites" onclick="allerA('mes-penalites')">Penalites</button>
     <button id="nav-fermeture" onclick="allerA('fermeture')">Fermer</button>
     <button id="nav-mes-retards" onclick="allerA('mes-retards')">Retards</button>
     <button id="nav-attente" onclick="allerA('attente')">Attente</button>
@@ -362,12 +408,12 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.09.09-1";
+const VERSION_APP = "2026.09.25-2";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
 let db;
-const requeteDB = indexedDB.open("imj_mobile", 9);
+const requeteDB = indexedDB.open("imj_mobile", 10);
 requeteDB.onupgradeneeded = (e) => {
   db = e.target.result;
   if (!db.objectStoreNames.contains("session")) db.createObjectStore("session", { keyPath: "cle" });
@@ -380,6 +426,8 @@ requeteDB.onupgradeneeded = (e) => {
   if (!db.objectStoreNames.contains("reprises_historiques")) db.createObjectStore("reprises_historiques", { keyPath: "id_local" });
   if (!db.objectStoreNames.contains("rattrapages")) db.createObjectStore("rattrapages", { keyPath: "id_local" });
   if (!db.objectStoreNames.contains("clients_cache")) db.createObjectStore("clients_cache", { keyPath: "telephone" });
+  if (!db.objectStoreNames.contains("ventes_carnet")) db.createObjectStore("ventes_carnet", { keyPath: "id_local" });
+  if (!db.objectStoreNames.contains("confirmations_penalite")) db.createObjectStore("confirmations_penalite", { keyPath: "id_local" });
 };
 requeteDB.onsuccess = (e) => {
   db = e.target.result;
@@ -533,7 +581,7 @@ function afficherApp(session) {
 }
 
 function allerA(page) {
-  ["nouveau-client", "mise", "credit", "mes-demandes", "mon-rapport", "client-existant", "fermeture", "mes-retards", "attente"].forEach(p => {
+  ["nouveau-client", "mise", "credit", "mes-demandes", "mon-rapport", "client-existant", "vente", "mes-penalites", "fermeture", "mes-retards", "attente"].forEach(p => {
     document.getElementById(`page-${p}`).className = p === page ? "visible" : "cache";
     document.getElementById(`nav-${p === "nouveau-client" ? "client" : p}`).className = p === page ? "actif" : "";
   });
@@ -983,6 +1031,130 @@ async function enregistrerNouveauCarnetClientExistant() {
   rafraichirListeAttente();
 }
 
+async function enregistrerVenteCarnet() {
+  const mise = parseInt(document.getElementById("vc-mise").value);
+  const nomClient = document.getElementById("vc-nom-client").value.trim();
+  const messageEl = document.getElementById("vc-message");
+  messageEl.className = "erreur";
+
+  if (!nomClient) {
+    messageEl.textContent = "Le nom du client est obligatoire.";
+    return;
+  }
+  if (!mise) {
+    messageEl.textContent = "La mise de depart est obligatoire.";
+    return;
+  }
+
+  const pasDeTelephone = document.getElementById("vc-pas-de-telephone").checked;
+  let telephoneClient = document.getElementById("vc-telephone-client").value.trim();
+
+  if (pasDeTelephone) {
+    telephoneClient = "SANS-TEL-" + genererUUID().slice(0, 8).toUpperCase();
+  } else if (telephoneClient) {
+    const telephoneNettoye = telephoneClient.replace(/[\s\-.]/g, "");
+    if (telephoneNettoye.length < 6 || !/^[0-9]+$/.test(telephoneNettoye)) {
+      messageEl.textContent = "Telephone invalide. Si le client n'a vraiment aucun telephone, coche la case ci-dessus au lieu de taper '-'.";
+      return;
+    }
+  }
+
+  const session = await lireObjet("session", "agent");
+  const idLocal = genererUUID();
+
+  const vente = {
+    id_local: idLocal,
+    agent_id: session.code,
+    type_carnet: document.getElementById("vc-type").value,
+    categorie: document.getElementById("vc-categorie").value,
+    mise_depart: mise,
+    nom_client: nomClient,
+    prenom_client: document.getElementById("vc-prenom-client").value.trim(),
+    telephone_client: telephoneClient,
+    date_vente: new Date().toISOString().split("T")[0],
+    created_at: new Date().toISOString(),
+    statut_import: "en_attente",
+    synchronise: false
+  };
+
+  await stockerObjet("ventes_carnet", vente);
+
+  messageEl.className = "succes";
+  messageEl.textContent = "Vente enregistree localement. Sera traitee a la prochaine synchronisation.";
+  document.getElementById("vc-mise").value = "";
+  document.getElementById("vc-nom-client").value = "";
+  document.getElementById("vc-prenom-client").value = "";
+  document.getElementById("vc-telephone-client").value = "";
+  document.getElementById("vc-pas-de-telephone").checked = false;
+  rafraichirListeAttente();
+}
+
+async function chargerMesPenalites() {
+  const conteneur = document.getElementById("liste-penalites");
+  const messageEl = document.getElementById("penalites-message");
+  messageEl.className = "";
+  messageEl.textContent = "Chargement...";
+  conteneur.innerHTML = "";
+
+  const session = await lireObjet("session", "agent");
+
+  try {
+    const reponse = await fetch(`${SUPABASE_URL}/rest/v1/penalites_agents_mobile?agent_id=eq.${session.code}&order=date_creation.asc`, {
+      headers: await enTetesAuth(),
+      cache: "no-store"
+    });
+    const penalites = await reponse.json();
+
+    if (!penalites.length) {
+      messageEl.className = "succes";
+      messageEl.textContent = "Aucune penalite en attente.";
+      return;
+    }
+
+    const confirmationsLocales = await listerObjets("confirmations_penalite");
+    const idsDejaConfirmes = confirmationsLocales.map(c => c.penalite_id);
+
+    messageEl.textContent = "";
+    penalites.forEach(p => {
+      const dejaConfirme = idsDejaConfirmes.includes(p.penalite_id);
+      conteneur.innerHTML += `
+        <div class="ligne-attente" style="flex-direction:column; align-items:flex-start;">
+          <div style="display:flex; justify-content:space-between; width:100%;">
+            <span><b>${p.nom_client}</b></span>
+            <span class="badge" style="background:#FEE2E2; color:#991B1B;">${p.montant} F</span>
+          </div>
+          <span style="font-size:13px; color:#212529; margin-top:4px;">${p.type_produit} -- depuis le ${p.date_creation}</span>
+          ${dejaConfirme
+            ? `<span style="font-size:12px; color:#0D581A; margin-top:6px;">Deja confirmee, en attente de synchronisation</span>`
+            : `<button style="margin-top:8px;" onclick="confirmerPenalite(${p.penalite_id})">Confirmer reglee</button>`}
+        </div>`;
+    });
+  } catch (erreur) {
+    messageEl.className = "erreur";
+    messageEl.textContent = "Impossible de charger (verifie ta connexion internet).";
+  }
+}
+
+async function confirmerPenalite(penaliteId) {
+  const session = await lireObjet("session", "agent");
+  const idLocal = genererUUID();
+
+  const confirmation = {
+    id_local: idLocal,
+    agent_id: session.code,
+    penalite_id: penaliteId,
+    date_confirmation: new Date().toISOString().split("T")[0],
+    created_at: new Date().toISOString(),
+    statut_import: "en_attente",
+    synchronise: false
+  };
+
+  await stockerObjet("confirmations_penalite", confirmation);
+  alert("Confirmation enregistree localement. Sera synchronisee vers le bureau.");
+  chargerMesPenalites();
+  rafraichirListeAttente();
+}
+
 async function enregistrerFermetureVolontaire() {
   const carnet = parseInt(document.getElementById("fc-carnet").value);
   const messageEl = document.getElementById("fc-message");
@@ -1140,11 +1312,13 @@ async function rafraichirListeAttente() {
   const nouveauxCarnets = (await listerObjets("nouveaux_carnets")).filter(n => !n.synchronise);
   const reprisesHistoriques = (await listerObjets("reprises_historiques")).filter(r => !r.synchronise);
   const rattrapages = (await listerObjets("rattrapages")).filter(r => !r.synchronise);
+  const ventesCarnet = (await listerObjets("ventes_carnet")).filter(v => !v.synchronise);
+  const confirmationsPenalite = (await listerObjets("confirmations_penalite")).filter(c => !c.synchronise);
   const conteneur = document.getElementById("liste-attente");
   const rienEl = document.getElementById("rien-attente");
 
   conteneur.innerHTML = "";
-  const total = clients.length + mises.length + demandesCredit.length + confirmationsRemise.length + fermeturesVolontaires.length + nouveauxCarnets.length + reprisesHistoriques.length + rattrapages.length;
+  const total = clients.length + mises.length + demandesCredit.length + confirmationsRemise.length + fermeturesVolontaires.length + nouveauxCarnets.length + reprisesHistoriques.length + rattrapages.length + ventesCarnet.length + confirmationsPenalite.length;
   rienEl.style.display = total === 0 ? "block" : "none";
 
   clients.forEach(c => {
@@ -1171,6 +1345,12 @@ async function rafraichirListeAttente() {
   });
   rattrapages.forEach(r => {
     conteneur.innerHTML += `<div class="ligne-attente"><span>Rattrapage carnet ${r.numero_carnet} (${r.nombre_mises} mises)</span><span class="badge">en attente</span></div>`;
+  });
+  ventesCarnet.forEach(v => {
+    conteneur.innerHTML += `<div class="ligne-attente"><span>Vente carnet -- ${v.nom_client}</span><span class="badge">en attente</span></div>`;
+  });
+  confirmationsPenalite.forEach(c => {
+    conteneur.innerHTML += `<div class="ligne-attente"><span>Confirmation penalite #${c.penalite_id}</span><span class="badge">en attente</span></div>`;
   });
 }
 
@@ -1398,6 +1578,56 @@ async function synchroniser() {
       }
     } catch (e) {
       detailsErreurs.push(`Rattrapage carnet ${rattrapage.numero_carnet} : erreur reseau -- ${e.message}`);
+      echecs++;
+    }
+  }
+
+  const ventesCarnet = (await listerObjets("ventes_carnet")).filter(v => !v.synchronise);
+  for (const vente of ventesCarnet) {
+    const corps = { ...vente };
+    delete corps.synchronise;
+    try {
+      const reponse = await fetch(`${SUPABASE_URL}/rest/v1/ventes_carnet_mobile?on_conflict=id_local`, {
+        method: "POST",
+        headers: { ...headers, Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify(corps)
+      });
+      if (reponse.ok) {
+        vente.synchronise = true;
+        await stockerObjet("ventes_carnet", vente);
+        envoyes++;
+      } else {
+        const texteErreur = await reponse.text();
+        detailsErreurs.push(`Vente carnet ${vente.nom_client} : HTTP ${reponse.status} -- ${texteErreur.slice(0, 200)}`);
+        echecs++;
+      }
+    } catch (e) {
+      detailsErreurs.push(`Vente carnet ${vente.nom_client} : erreur reseau -- ${e.message}`);
+      echecs++;
+    }
+  }
+
+  const confirmationsPenalite = (await listerObjets("confirmations_penalite")).filter(c => !c.synchronise);
+  for (const confirmation of confirmationsPenalite) {
+    const corps = { ...confirmation };
+    delete corps.synchronise;
+    try {
+      const reponse = await fetch(`${SUPABASE_URL}/rest/v1/confirmations_penalite_mobile?on_conflict=id_local`, {
+        method: "POST",
+        headers: { ...headers, Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify(corps)
+      });
+      if (reponse.ok) {
+        confirmation.synchronise = true;
+        await stockerObjet("confirmations_penalite", confirmation);
+        envoyes++;
+      } else {
+        const texteErreur = await reponse.text();
+        detailsErreurs.push(`Confirmation penalite #${confirmation.penalite_id} : HTTP ${reponse.status} -- ${texteErreur.slice(0, 200)}`);
+        echecs++;
+      }
+    } catch (e) {
+      detailsErreurs.push(`Confirmation penalite #${confirmation.penalite_id} : erreur reseau -- ${e.message}`);
       echecs++;
     }
   }
