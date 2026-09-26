@@ -358,6 +358,16 @@
       </div>
     </div>
 
+    <div id="page-mes-clients" class="cache">
+      <div class="carte">
+        <h2>Mes clients recents</h2>
+        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Numero de carnet reel attribue par le bureau, une fois ta saisie traitee.</p>
+        <button onclick="chargerMesClientsRecents()">Actualiser</button>
+        <div id="liste-clients-recents" style="margin-top:14px;"></div>
+        <p id="clients-recents-message"></p>
+      </div>
+    </div>
+
     <div id="page-mes-penalites" class="cache">
       <div class="carte">
         <h2>Mes penalites a recuperer</h2>
@@ -399,6 +409,7 @@
     <button id="nav-mes-demandes" onclick="allerA('mes-demandes')">Demandes</button>
     <button id="nav-mon-rapport" onclick="allerA('mon-rapport')">Rapport</button>
     <button id="nav-client-existant" onclick="allerA('client-existant')">+Carnet</button>
+    <button id="nav-mes-clients" onclick="allerA('mes-clients')">Mes clients</button>
     <button id="nav-vente" onclick="allerA('vente')">Vente</button>
     <button id="nav-mes-penalites" onclick="allerA('mes-penalites')">Penalites</button>
     <button id="nav-fermeture" onclick="allerA('fermeture')">Fermer</button>
@@ -408,7 +419,7 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.09.25-2";
+const VERSION_APP = "2026.09.25-3";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
@@ -581,7 +592,7 @@ function afficherApp(session) {
 }
 
 function allerA(page) {
-  ["nouveau-client", "mise", "credit", "mes-demandes", "mon-rapport", "client-existant", "vente", "mes-penalites", "fermeture", "mes-retards", "attente"].forEach(p => {
+  ["nouveau-client", "mise", "credit", "mes-demandes", "mon-rapport", "client-existant", "vente", "mes-penalites", "mes-clients", "fermeture", "mes-retards", "attente"].forEach(p => {
     document.getElementById(`page-${p}`).className = p === page ? "visible" : "cache";
     document.getElementById(`nav-${p === "nouveau-client" ? "client" : p}`).className = p === page ? "actif" : "";
   });
@@ -1087,6 +1098,51 @@ async function enregistrerVenteCarnet() {
   document.getElementById("vc-telephone-client").value = "";
   document.getElementById("vc-pas-de-telephone").checked = false;
   rafraichirListeAttente();
+}
+
+async function chargerMesClientsRecents() {
+  const conteneur = document.getElementById("liste-clients-recents");
+  const messageEl = document.getElementById("clients-recents-message");
+  messageEl.className = "";
+  messageEl.textContent = "Chargement...";
+  conteneur.innerHTML = "";
+
+  const session = await lireObjet("session", "agent");
+
+  try {
+    const reponse = await fetch(`${SUPABASE_URL}/rest/v1/clients_mobile?agent_id=eq.${session.code}&order=created_at.desc&limit=20`, {
+      headers: await enTetesAuth(),
+      cache: "no-store"
+    });
+    const clientsRecents = await reponse.json();
+
+    if (!clientsRecents.length) {
+      messageEl.className = "succes";
+      messageEl.textContent = "Aucun client enregistre pour l'instant.";
+      return;
+    }
+
+    messageEl.textContent = "";
+    clientsRecents.forEach(c => {
+      let statutAffiche = "En attente de traitement au bureau";
+      let couleurBadge = "background:#FEF3C7; color:#92400E;";
+      if (c.statut_import === "importe" && c.numero_carnet_assigne) {
+        statutAffiche = `Carnet n° ${c.numero_carnet_assigne}`;
+        couleurBadge = "background:#D1FAE5; color:#065F46;";
+      } else if (c.statut_import === "erreur") {
+        statutAffiche = "Erreur -- a verifier au bureau";
+        couleurBadge = "background:#FEE2E2; color:#991B1B;";
+      }
+      conteneur.innerHTML += `
+        <div class="ligne-attente" style="flex-direction:column; align-items:flex-start;">
+          <span><b>${c.nom} ${c.prenom || ""}</b></span>
+          <span class="badge" style="${couleurBadge} margin-top:4px;">${statutAffiche}</span>
+        </div>`;
+    });
+  } catch (erreur) {
+    messageEl.className = "erreur";
+    messageEl.textContent = "Impossible de charger (verifie ta connexion internet).";
+  }
 }
 
 async function chargerMesPenalites() {
