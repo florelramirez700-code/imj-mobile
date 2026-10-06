@@ -272,7 +272,7 @@
     <div id="page-mes-demandes" class="cache">
       <div class="carte">
         <h2>Mes demandes de credit</h2>
-        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Necessite une connexion internet pour voir les statuts a jour.</p>
+        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Avec internet : statuts a jour. Sans reseau : la derniere copie gardee dans le telephone.</p>
         <button onclick="chargerMesDemandes()">Actualiser</button>
         <div id="liste-mes-demandes" style="margin-top:14px;"></div>
         <p id="demandes-message"></p>
@@ -289,7 +289,7 @@
       </div>
       <div class="carte">
         <h2>Dernieres mises traitees</h2>
-        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Necessite une connexion internet. Verifie ici si une nouvelle page a ete ouverte automatiquement (avec sa date de fin a noter dans le carnet du client).</p>
+        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Sans reseau, la derniere copie gardee est affichee. Verifie ici si une nouvelle page a ete ouverte automatiquement (avec sa date de fin a noter dans le carnet du client).</p>
         <button onclick="chargerHistoriqueMises()">Actualiser</button>
         <div id="liste-historique-mises" style="margin-top:14px;"></div>
         <p id="historique-mises-message"></p>
@@ -299,7 +299,7 @@
     <div id="page-mon-rapport" class="cache">
       <div class="carte">
         <h2>Mon rapport</h2>
-        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Affiche ton dernier rapport traite (generalement celui de la veille). Necessite une connexion internet.</p>
+        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Affiche ton dernier rapport traite (generalement celui de la veille). Sans reseau, la derniere copie gardee est affichee.</p>
         <button onclick="chargerMonRapport()">Actualiser</button>
         <div id="contenu-mon-rapport" style="margin-top:14px;"></div>
         <p id="rapport-message"></p>
@@ -424,12 +424,12 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.09.28-1";
+const VERSION_APP = "2026.10.06-1";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
 let db;
-const requeteDB = indexedDB.open("imj_mobile", 12);
+const requeteDB = indexedDB.open("imj_mobile", 13);
 requeteDB.onupgradeneeded = (e) => {
   db = e.target.result;
   if (!db.objectStoreNames.contains("session")) db.createObjectStore("session", { keyPath: "cle" });
@@ -444,6 +444,7 @@ requeteDB.onupgradeneeded = (e) => {
   if (!db.objectStoreNames.contains("clients_cache")) db.createObjectStore("clients_cache", { keyPath: "telephone" });
   if (!db.objectStoreNames.contains("confirmations_penalite")) db.createObjectStore("confirmations_penalite", { keyPath: "id_local" });
   if (!db.objectStoreNames.contains("operations_carnet")) db.createObjectStore("operations_carnet", { keyPath: "id_local" });
+  if (!db.objectStoreNames.contains("copies_ecrans")) db.createObjectStore("copies_ecrans", { keyPath: "cle" });
 };
 requeteDB.onsuccess = (e) => {
   db = e.target.result;
@@ -504,6 +505,35 @@ function listerObjets(magasin) {
     const requete = tx.objectStore(magasin).getAll();
     requete.onsuccess = () => resolve(requete.result || []);
   });
+}
+
+// Lit une liste sur le serveur et en garde une copie dans le telephone. Sans
+// reseau (ou si le serveur refuse), rend la derniere copie gardee avec sa date.
+async function lireAvecCopie(nom, cheminRequete) {
+  const session = await lireObjet("session", "agent");
+  const cle = `${nom}:${session.code}`;
+  try {
+    const reponse = await fetch(`${SUPABASE_URL}/rest/v1/${cheminRequete}`, {
+      headers: await enTetesAuth(),
+      cache: "no-store"
+    });
+    if (!reponse.ok) throw new Error(`Reponse ${reponse.status}`);
+    const donnees = await reponse.json();
+    await stockerObjet("copies_ecrans", { cle: cle, donnees: donnees, date_copie: new Date().toISOString() });
+    return { donnees: donnees, dateCopie: null };
+  } catch (erreur) {
+    const copie = await lireObjet("copies_ecrans", cle);
+    if (!copie) throw erreur;
+    return { donnees: copie.donnees, dateCopie: copie.date_copie };
+  }
+}
+
+// Mention a afficher quand l'ecran montre une copie et non les chiffres du moment.
+function mentionCopie(dateCopie) {
+  if (!dateCopie) return "";
+  const d = new Date(dateCopie);
+  const deux = n => String(n).padStart(2, "0");
+  return ` Sans reseau : copie du ${deux(d.getDate())}/${deux(d.getMonth() + 1)} a ${deux(d.getHours())} h ${deux(d.getMinutes())}.`;
 }
 
 async function verifierSessionExistante() {
@@ -649,6 +679,8 @@ function allerA(page) {
   if (page === "mes-demandes") chargerMesDemandes();
   if (page === "mon-rapport") chargerMonRapport();
   if (page === "mes-retards") chargerMesRetards();
+  if (page === "mes-penalites") chargerMesPenalites();
+  if (page === "mes-clients") chargerMesClientsRecents();
 }
 
 document.getElementById("m-mode").addEventListener("change", (e) => {
@@ -936,18 +968,14 @@ async function chargerMesDemandes() {
   const session = await lireObjet("session", "agent");
 
   try {
-    const reponse = await fetch(`${SUPABASE_URL}/rest/v1/demandes_credit_mobile?agent_id=eq.${session.code}&order=created_at.desc&limit=20`, {
-      headers: await enTetesAuth(),
-      cache: "no-store"
-    });
-    const demandes = await reponse.json();
+    const { donnees: demandes, dateCopie } = await lireAvecCopie("demandes", `demandes_credit_mobile?agent_id=eq.${session.code}&order=created_at.desc&limit=20`);
 
     if (!demandes.length) {
-      messageEl.textContent = "Aucune demande envoyee pour l'instant.";
+      messageEl.textContent = "Aucune demande envoyee pour l'instant." + mentionCopie(dateCopie);
       return;
     }
 
-    messageEl.textContent = "";
+    messageEl.textContent = mentionCopie(dateCopie).trim();
     demandes.forEach(d => {
       let classeStatut = "badge";
       let texteStatut = "en attente";
@@ -970,7 +998,7 @@ async function chargerMesDemandes() {
     });
   } catch (erreur) {
     messageEl.className = "erreur";
-    messageEl.textContent = "Impossible de charger (verifie ta connexion internet).";
+    messageEl.textContent = "Impossible de charger, et aucune copie dans le telephone : ouvre cet ecran une fois avec internet.";
   }
 }
 
@@ -1124,19 +1152,15 @@ async function chargerMesClientsRecents() {
   const session = await lireObjet("session", "agent");
 
   try {
-    const reponse = await fetch(`${SUPABASE_URL}/rest/v1/clients_mobile?agent_id=eq.${session.code}&order=created_at.desc&limit=20`, {
-      headers: await enTetesAuth(),
-      cache: "no-store"
-    });
-    const clientsRecents = await reponse.json();
+    const { donnees: clientsRecents, dateCopie } = await lireAvecCopie("clients_recents", `clients_mobile?agent_id=eq.${session.code}&order=created_at.desc&limit=20`);
 
     if (!clientsRecents.length) {
       messageEl.className = "succes";
-      messageEl.textContent = "Aucun client enregistre pour l'instant.";
+      messageEl.textContent = "Aucun client enregistre pour l'instant." + mentionCopie(dateCopie);
       return;
     }
 
-    messageEl.textContent = "";
+    messageEl.textContent = mentionCopie(dateCopie).trim();
     clientsRecents.forEach(c => {
       let statutAffiche = "En attente de traitement au bureau";
       let couleurBadge = "background:#FEF3C7; color:#92400E;";
@@ -1155,7 +1179,7 @@ async function chargerMesClientsRecents() {
     });
   } catch (erreur) {
     messageEl.className = "erreur";
-    messageEl.textContent = "Impossible de charger (verifie ta connexion internet).";
+    messageEl.textContent = "Impossible de charger, et aucune copie dans le telephone : ouvre cet ecran une fois avec internet.";
   }
 }
 
@@ -1169,22 +1193,18 @@ async function chargerMesPenalites() {
   const session = await lireObjet("session", "agent");
 
   try {
-    const reponse = await fetch(`${SUPABASE_URL}/rest/v1/penalites_agents_mobile?agent_id=eq.${session.code}&order=date_creation.asc`, {
-      headers: await enTetesAuth(),
-      cache: "no-store"
-    });
-    const penalites = await reponse.json();
+    const { donnees: penalites, dateCopie } = await lireAvecCopie("penalites", `penalites_agents_mobile?agent_id=eq.${session.code}&order=date_creation.asc`);
 
     if (!penalites.length) {
       messageEl.className = "succes";
-      messageEl.textContent = "Aucune penalite en attente.";
+      messageEl.textContent = "Aucune penalite en attente." + mentionCopie(dateCopie);
       return;
     }
 
     const confirmationsLocales = await listerObjets("confirmations_penalite");
     const idsDejaConfirmes = confirmationsLocales.map(c => c.penalite_id);
 
-    messageEl.textContent = "";
+    messageEl.textContent = mentionCopie(dateCopie).trim();
     penalites.forEach(p => {
       const dejaConfirme = idsDejaConfirmes.includes(p.penalite_id);
       conteneur.innerHTML += `
@@ -1201,7 +1221,7 @@ async function chargerMesPenalites() {
     });
   } catch (erreur) {
     messageEl.className = "erreur";
-    messageEl.textContent = "Impossible de charger (verifie ta connexion internet).";
+    messageEl.textContent = "Impossible de charger, et aucune copie dans le telephone : ouvre cet ecran une fois avec internet.";
   }
 }
 
@@ -1268,19 +1288,15 @@ async function chargerMonRapport() {
   const session = await lireObjet("session", "agent");
 
   try {
-    const reponse = await fetch(`${SUPABASE_URL}/rest/v1/rapports_agents_mobile?agent_id=eq.${session.code}&order=date_rapport.desc&limit=1`, {
-      headers: await enTetesAuth(),
-      cache: "no-store"
-    });
-    const rapports = await reponse.json();
+    const { donnees: rapports, dateCopie } = await lireAvecCopie("rapport", `rapports_agents_mobile?agent_id=eq.${session.code}&order=date_rapport.desc&limit=1`);
 
     if (!rapports.length) {
-      messageEl.textContent = "Aucun rapport disponible pour l'instant (repasse apres la prochaine synchronisation du bureau).";
+      messageEl.textContent = "Aucun rapport disponible pour l'instant (repasse apres la prochaine synchronisation du bureau)." + mentionCopie(dateCopie);
       return;
     }
 
     const r = rapports[0];
-    messageEl.textContent = "";
+    messageEl.textContent = mentionCopie(dateCopie).trim();
     conteneur.innerHTML = `
       <div class="ligne-attente"><span>Date</span><span><b>${echapper(r.date_rapport)}</b></span></div>
       <div class="ligne-attente"><span>Total collecte</span><span><b>${echapper(r.total_collecte)} F</b></span></div>
@@ -1290,7 +1306,7 @@ async function chargerMonRapport() {
     `;
   } catch (erreur) {
     messageEl.className = "erreur";
-    messageEl.textContent = "Impossible de charger (verifie ta connexion internet).";
+    messageEl.textContent = "Impossible de charger, et aucune copie dans le telephone : ouvre cet ecran une fois avec internet.";
   }
 }
 
@@ -1304,19 +1320,15 @@ async function chargerMesRetards() {
   const session = await lireObjet("session", "agent");
 
   try {
-    const reponse = await fetch(`${SUPABASE_URL}/rest/v1/retards_agents_mobile?agent_id=eq.${session.code}&order=jours_retard.desc`, {
-      headers: await enTetesAuth(),
-      cache: "no-store"
-    });
-    const retards = await reponse.json();
+    const { donnees: retards, dateCopie } = await lireAvecCopie("retards", `retards_agents_mobile?agent_id=eq.${session.code}&order=jours_retard.desc`);
 
     if (!retards.length) {
       messageEl.className = "succes";
-      messageEl.textContent = "Aucun client en retard. Bon travail !";
+      messageEl.textContent = "Aucun client en retard. Bon travail !" + mentionCopie(dateCopie);
       return;
     }
 
-    messageEl.textContent = "";
+    messageEl.textContent = mentionCopie(dateCopie).trim();
     retards.forEach(r => {
       conteneur.innerHTML += `
         <div class="ligne-attente" style="flex-direction:column; align-items:flex-start;">
@@ -1329,7 +1341,7 @@ async function chargerMesRetards() {
     });
   } catch (erreur) {
     messageEl.className = "erreur";
-    messageEl.textContent = "Impossible de charger (verifie ta connexion internet).";
+    messageEl.textContent = "Impossible de charger, et aucune copie dans le telephone : ouvre cet ecran une fois avec internet.";
   }
 }
 
@@ -1343,18 +1355,14 @@ async function chargerHistoriqueMises() {
   const session = await lireObjet("session", "agent");
 
   try {
-    const reponse = await fetch(`${SUPABASE_URL}/rest/v1/mises_mobile?agent_id=eq.${session.code}&statut_import=eq.importe&order=date_import.desc&limit=15`, {
-      headers: await enTetesAuth(),
-      cache: "no-store"
-    });
-    const mises = await reponse.json();
+    const { donnees: mises, dateCopie } = await lireAvecCopie("historique_mises", `mises_mobile?agent_id=eq.${session.code}&statut_import=eq.importe&order=date_import.desc&limit=15`);
 
     if (!mises.length) {
-      messageEl.textContent = "Aucune mise traitee pour l'instant.";
+      messageEl.textContent = "Aucune mise traitee pour l'instant." + mentionCopie(dateCopie);
       return;
     }
 
-    messageEl.textContent = "";
+    messageEl.textContent = mentionCopie(dateCopie).trim();
     mises.forEach(m => {
       const cible = m.numero_carnet ? `Carnet ${echapper(m.numero_carnet)}` : "Nouveau client";
       const estNouvellePage = m.resultat_message && m.resultat_message.includes("Nouvelle page ouverte");
@@ -1369,7 +1377,7 @@ async function chargerHistoriqueMises() {
     });
   } catch (erreur) {
     messageEl.className = "erreur";
-    messageEl.textContent = "Impossible de charger (verifie ta connexion internet).";
+    messageEl.textContent = "Impossible de charger, et aucune copie dans le telephone : ouvre cet ecran une fois avec internet.";
   }
 }
 
