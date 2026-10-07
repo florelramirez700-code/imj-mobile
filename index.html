@@ -238,7 +238,8 @@
 
         <div id="m-bloc-existant">
           <label>Numero de carnet *</label>
-          <input type="number" id="m-carnet">
+          <input type="number" id="m-carnet" inputmode="numeric">
+          <p id="m-carnet-info" style="font-size:14px; font-weight:600; margin:6px 0 2px;"></p>
         </div>
 
         <div id="m-bloc-nouveau" class="cache">
@@ -261,7 +262,8 @@
         <h2>Demander un credit</h2>
         <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Indique juste le numero de carnet -- le systeme verifie automatiquement si le client est eligible et envoie la demande a valider si c'est le cas.</p>
         <label>Numero de carnet *</label>
-        <input type="number" id="cr-carnet">
+        <input type="number" id="cr-carnet" inputmode="numeric">
+          <p id="cr-carnet-info" style="font-size:14px; font-weight:600; margin:6px 0 2px;"></p>
         <label>Commentaire (optionnel)</label>
         <input type="text" id="cr-commentaire" placeholder="Ex: client souhaite un credit Dizaine">
         <button onclick="enregistrerDemandeCredit()">Envoyer la demande</button>
@@ -382,7 +384,8 @@
         <h2>Fermer un cycle (client qui arrete)</h2>
         <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Pour un client qui souhaite arreter sa page actuelle avant sa fin naturelle -- soit pour repartir sur une nouvelle page fraiche (ex: changer de mise), soit pour retirer definitivement. Le nouveau cycle s'ouvrira automatiquement a la prochaine mise saisie.</p>
         <label>Numero de carnet *</label>
-        <input type="number" id="fc-carnet">
+        <input type="number" id="fc-carnet" inputmode="numeric">
+          <p id="fc-carnet-info" style="font-size:14px; font-weight:600; margin:6px 0 2px;"></p>
         <label>Motif (optionnel)</label>
         <input type="text" id="fc-motif" placeholder="Ex: client part du quartier">
         <button onclick="enregistrerFermetureVolontaire()">Enregistrer la fermeture</button>
@@ -424,7 +427,7 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.10.06-1";
+const VERSION_APP = "2026.10.07-1";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
@@ -534,6 +537,80 @@ function mentionCopie(dateCopie) {
   const d = new Date(dateCopie);
   const deux = n => String(n).padStart(2, "0");
   return ` Sans reseau : copie du ${deux(d.getDate())}/${deux(d.getMonth() + 1)} a ${deux(d.getHours())} h ${deux(d.getMinutes())}.`;
+}
+
+// Liste des carnets du bureau (numero -> client), gardee dans le telephone. Elle
+// sert a montrer le nom du client des que l'agent tape un numero, meme sans
+// reseau : il n'y a plus de fiche papier pour rattraper un numero mal tape.
+let carnetsConnus = new Map();
+let dateListeCarnets = null;
+let codeAgentConnecte = null;
+const CHAMPS_NUMERO_CARNET = ["m-carnet", "cr-carnet", "fc-carnet"];
+
+async function chargerListeCarnets() {
+  const copie = await lireObjet("copies_ecrans", "carnets");
+  if (!copie) return;
+  carnetsConnus = new Map(copie.donnees.map(c => [Number(c.numero_carnet), c]));
+  dateListeCarnets = copie.date_copie;
+}
+
+async function telechargerListeCarnets() {
+  try {
+    const reponse = await fetch(`${SUPABASE_URL}/rest/v1/carnets_mobile?select=numero_carnet,code_agent,nom_client,type_carnet,mise`, {
+      headers: await enTetesAuth(),
+      cache: "no-store"
+    });
+    if (reponse.ok) {
+      const carnets = await reponse.json();
+      // Une liste vide ne remplace jamais la copie : tous les numeros deviendraient "inconnus".
+      if (Array.isArray(carnets) && carnets.length) {
+        await stockerObjet("copies_ecrans", { cle: "carnets", donnees: carnets, date_copie: new Date().toISOString() });
+      }
+    }
+  } catch (erreur) {
+    // Pas de reseau -- la copie deja gardee reste utilisable.
+  }
+  await chargerListeCarnets();
+  CHAMPS_NUMERO_CARNET.forEach(afficherNomDuCarnet);
+}
+
+// Ce que le telephone sait d'un numero : le carnet s'il est connu, sinon null.
+// Sans liste dans le telephone, rien n'est jamais dit "inconnu".
+function decrireCarnet(numero) {
+  const carnet = carnetsConnus.get(Number(numero));
+  if (carnet) {
+    const detail = `carnet ${carnet.type_carnet === "bloque" ? "bloque" : "ordinaire"}${carnet.mise ? `, mise ${carnet.mise} F` : ""}`;
+    const autreAgent = codeAgentConnecte && carnet.code_agent !== codeAgentConnecte;
+    return {
+      carnet: carnet,
+      texte: `${carnet.nom_client} -- ${detail}${autreAgent ? `. ATTENTION : carnet suivi par ${carnet.code_agent}.` : ""}`,
+      couleur: autreAgent ? "#E99A0C" : "#0D581A",
+    };
+  }
+  if (!carnetsConnus.size) return { carnet: null, texte: "", couleur: "" };
+  return {
+    carnet: null,
+    texte: `Numero inconnu au bureau (${mentionCopie(dateListeCarnets).trim().replace("Sans reseau : copie", "liste").replace(/\.$/, "")}). Verifie le numero.`,
+    couleur: "#DC2945",
+  };
+}
+
+function afficherNomDuCarnet(idChamp) {
+  const info = document.getElementById(`${idChamp}-info`);
+  const numero = parseInt(document.getElementById(idChamp).value);
+  const description = numero ? decrireCarnet(numero) : { texte: "", couleur: "" };
+  info.textContent = description.texte;
+  info.style.color = description.couleur;
+}
+
+CHAMPS_NUMERO_CARNET.forEach(idChamp => {
+  document.getElementById(idChamp).addEventListener("input", () => afficherNomDuCarnet(idChamp));
+});
+
+// Avant d'enregistrer sur un numero que le bureau ne connait pas : l'agent confirme.
+function numeroCarnetAccepte(numero) {
+  if (decrireCarnet(numero).carnet || !carnetsConnus.size) return true;
+  return confirm(`Le carnet ${numero} n'est pas dans la liste du bureau.\n\nSi le numero est mal tape, appuie sur Annuler et corrige.\nSi c'est un carnet que le bureau n'a pas encore enregistre, appuie sur OK.`);
 }
 
 async function verifierSessionExistante() {
@@ -657,8 +734,10 @@ function afficherApp(session) {
   document.getElementById("header-nom").textContent = `${session.nom} (${session.code})`;
   document.getElementById("ecran-connexion").className = "cache";
   document.getElementById("ecran-app").className = "visible";
+  codeAgentConnecte = session.code;
   rafraichirListeAttente();
   rafraichirListeClientsLocaux();
+  chargerListeCarnets().then(telechargerListeCarnets);
 }
 
 const TOUTES_LES_PAGES = ["nouveau-client", "mise", "credit", "mes-demandes", "mon-rapport", "gerer-carnet", "mes-penalites", "mes-clients", "fermeture", "mes-retards", "attente", "plus"];
@@ -905,6 +984,10 @@ async function enregistrerMise() {
       messageEl.textContent = "Le numero de carnet est obligatoire.";
       return;
     }
+    if (!numeroCarnetAccepte(carnet)) {
+      messageEl.textContent = "Mise non enregistree : corrige le numero de carnet.";
+      return;
+    }
     mise.numero_carnet = carnet;
   } else {
     const idClientLocal = document.getElementById("m-client-local").value;
@@ -918,8 +1001,12 @@ async function enregistrerMise() {
   await stockerObjet("mises", mise);
 
   messageEl.className = "succes";
-  messageEl.textContent = "Mise enregistree localement. Sera synchronisee plus tard.";
+  const carnetDeLaMise = mise.numero_carnet ? decrireCarnet(mise.numero_carnet).carnet : null;
+  messageEl.textContent = carnetDeLaMise
+    ? `Mise enregistree pour ${carnetDeLaMise.nom_client} (carnet ${mise.numero_carnet}). Sera synchronisee plus tard.`
+    : "Mise enregistree localement. Sera synchronisee plus tard.";
   document.getElementById("m-carnet").value = "";
+  afficherNomDuCarnet("m-carnet");
   document.getElementById("m-montant").value = "";
   document.getElementById("m-nombre").value = "1";
   rafraichirListeAttente();
@@ -954,6 +1041,7 @@ async function enregistrerDemandeCredit() {
   messageEl.className = "succes";
   messageEl.textContent = "Demande enregistree localement. Sera envoyee a la prochaine synchronisation.";
   document.getElementById("cr-carnet").value = "";
+  afficherNomDuCarnet("cr-carnet");
   document.getElementById("cr-commentaire").value = "";
   rafraichirListeAttente();
 }
@@ -1274,6 +1362,7 @@ async function enregistrerFermetureVolontaire() {
   messageEl.className = "succes";
   messageEl.textContent = "Demande de fermeture enregistree localement. Sera traitee a la prochaine synchronisation.";
   document.getElementById("fc-carnet").value = "";
+  afficherNomDuCarnet("fc-carnet");
   document.getElementById("fc-motif").value = "";
   rafraichirListeAttente();
 }
@@ -1405,7 +1494,8 @@ async function rafraichirListeAttente() {
     conteneur.innerHTML += `<div class="ligne-attente"><span>Client : ${echapper(c.nom)}</span><span class="badge">en attente</span></div>`;
   });
   mises.forEach(m => {
-    const cible = m.numero_carnet ? `carnet ${echapper(m.numero_carnet)}` : "nouveau client (en attente de numero)";
+    const carnetConnu = m.numero_carnet ? decrireCarnet(m.numero_carnet).carnet : null;
+    const cible = m.numero_carnet ? `carnet ${echapper(m.numero_carnet)}${carnetConnu ? ` (${echapper(carnetConnu.nom_client)})` : ""}` : "nouveau client (en attente de numero)";
     conteneur.innerHTML += `<div class="ligne-attente"><span>Mise ${cible} : ${echapper(m.montant_unitaire * m.nombre_mise)} F</span><span class="badge">en attente</span></div>`;
   });
   demandesCredit.forEach(d => {
@@ -1438,6 +1528,7 @@ async function synchroniser() {
   messageEl.textContent = "Synchronisation en cours...";
 
   await telechargerClientsRecherche();
+  await telechargerListeCarnets();
 
   const headers = {
     ...(await enTetesAuth()),
