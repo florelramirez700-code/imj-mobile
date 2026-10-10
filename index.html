@@ -431,7 +431,7 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.10.10-3";
+const VERSION_APP = "2026.10.10-4";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
@@ -640,6 +640,23 @@ CHAMPS_NUMERO_CARNET.forEach(idChamp => {
 function numeroCarnetAccepte(numero) {
   if (decrireCarnet(numero).carnet || !carnetsConnus.size) return true;
   return confirm(`Le carnet ${numero} n'est pas dans la liste du bureau.\n\nSi le numero est mal tape, appuie sur Annuler et corrige.\nSi c'est un carnet que le bureau n'a pas encore enregistre, appuie sur OK.`);
+}
+
+// Garde-fou : le montant tape doit etre celui de la page en cours du carnet. Sinon l'agent confirme
+// (faute de frappe, ou client qui augmente sa mise : il doit alors completer la 1re case).
+function montantAccepte(numero, montant) {
+  const carnet = decrireCarnet(numero).carnet;
+  const miseConnue = carnet ? Number(carnet.mise) : 0;
+  if (!miseConnue || montant === miseConnue) return true;
+
+  if (carnet.type_carnet === "bloque") {
+    return confirm(`Le carnet ${numero} est un carnet bloque : sa mise est fixee a ${miseConnue} F et ne change jamais.\n\nTu saisis ${montant} F. Le bureau refusera cette mise.\n\nOK pour l'enregistrer quand meme, Annuler pour corriger.`);
+  }
+  if (montant < miseConnue) {
+    return confirm(`La mise de ce carnet est ${miseConnue} F et tu saisis ${montant} F.\n\nUne mise plus petite est refusee par le bureau, sauf si c'est une nouvelle page.\n\nOK pour l'enregistrer quand meme, Annuler pour corriger.`);
+  }
+  const alerteFaute = montant >= miseConnue * 5 ? "\nCe montant est tres au-dessus de la mise habituelle : verifie qu'il n'y a pas un zero de trop.\n" : "";
+  return confirm(`La mise de ce carnet est ${miseConnue} F et tu saisis ${montant} F.${alerteFaute}\nSi le client augmente sa mise, il doit aussi completer la 1re case de sa page (${montant - miseConnue} F de plus).\n\nOK pour enregistrer ${montant} F, Annuler pour corriger.`);
 }
 
 async function verifierSessionExistante() {
@@ -1023,6 +1040,10 @@ async function enregistrerMiseInterne() {
     }
     if (!numeroCarnetAccepte(carnet)) {
       messageEl.textContent = "Mise non enregistree : corrige le numero de carnet.";
+      return;
+    }
+    if (!montantAccepte(carnet, montant)) {
+      messageEl.textContent = "Mise non enregistree : corrige le montant.";
       return;
     }
     mise.numero_carnet = carnet;
