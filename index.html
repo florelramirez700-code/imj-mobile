@@ -276,6 +276,10 @@
         <h2>Mes demandes de credit</h2>
         <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Avec internet : statuts a jour. Sans reseau : la derniere copie gardee dans le telephone.</p>
         <button onclick="chargerMesDemandes()">Actualiser</button>
+        <h3 style="margin-top:18px;">Credits a remettre au client</h3>
+        <div id="liste-credits-a-remettre" style="margin-top:8px;"></div>
+        <p id="credits-a-remettre-message"></p>
+        <h3 style="margin-top:18px;">Demandes envoyees</h3>
         <div id="liste-mes-demandes" style="margin-top:14px;"></div>
         <p id="demandes-message"></p>
       </div>
@@ -427,7 +431,7 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.10.07-1";
+const VERSION_APP = "2026.10.10-1";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
@@ -1046,7 +1050,60 @@ async function enregistrerDemandeCredit() {
   rafraichirListeAttente();
 }
 
+// Credits deja confirmes sur ce telephone (envoyes ou en attente d'envoi) : on ne propose pas deux fois le bouton.
+async function creditsDejaConfirmes() {
+  const confirmations = await listerObjets("confirmations_remise");
+  return new Set(confirmations.map(c => Number(c.credit_id)));
+}
+
+// Tous les credits accordes (au bureau ou depuis le telephone) et pas encore remis aux clients de l'agent.
+async function chargerCreditsARemettre() {
+  const conteneur = document.getElementById("liste-credits-a-remettre");
+  const messageEl = document.getElementById("credits-a-remettre-message");
+  messageEl.className = "";
+  conteneur.innerHTML = "";
+
+  const session = await lireObjet("session", "agent");
+  try {
+    const { donnees: credits, dateCopie } = await lireAvecCopie("credits_a_remettre", `credits_a_remettre_mobile?code_agent=eq.${encodeURIComponent(session.code)}&order=echeance.asc`);
+    const dejaConfirmes = await creditsDejaConfirmes();
+    const restants = credits.filter(c => !dejaConfirmes.has(Number(c.credit_id)));
+
+    if (!restants.length) {
+      messageEl.textContent = "Aucun credit a remettre pour l'instant." + mentionCopie(dateCopie);
+      return;
+    }
+    messageEl.textContent = mentionCopie(dateCopie).trim();
+    let html = "";
+    restants.forEach(c => {
+      const interet = Number(c.interet_frais_a_encaisser) || 0;
+      html += `
+        <div class="ligne-attente" style="flex-direction:column; align-items:flex-start;">
+          <div style="display:flex; justify-content:space-between; width:100%;">
+            <span><b>Carnet ${echapper(c.numero_carnet)}</b> - ${echapper(c.nom_client)}</span>
+            <span class="badge">${echapper(c.type_produit)}</span>
+          </div>
+          <span style="font-size:13px; margin-top:4px;">A remettre au client : <b>${echapper(c.montant_a_remettre)} F</b></span>
+          ${interet > 0 ? `<span style="font-size:13px;">A encaisser du client avant la remise (interet et frais) : <b>${interet} F</b></span>` : ""}
+          <button style="margin-top:8px;" onclick="confirmerRemiseCredit(${Number(c.credit_id)}, ${Number(c.montant_a_remettre) || 0}, ${interet})">Confirmer la remise au client</button>
+        </div>`;
+    });
+    conteneur.innerHTML = html;
+  } catch (erreur) {
+    messageEl.className = "erreur";
+    messageEl.textContent = "Impossible de charger les credits a remettre, et aucune copie dans le telephone : ouvre cet ecran une fois avec internet.";
+  }
+}
+
+async function confirmerRemiseCredit(creditId, montant, interet) {
+  const texteInteret = interet > 0 ? `\nTu as encaisse ${interet} F d'interet et de frais, a rapporter au bureau.` : "";
+  if (!confirm(`Confirmer que tu as remis ${montant} F au client ?${texteInteret}`)) return;
+  await confirmerRemise(null, creditId);
+  await chargerMesDemandes();
+}
+
 async function chargerMesDemandes() {
+  await chargerCreditsARemettre();
   const conteneur = document.getElementById("liste-mes-demandes");
   const messageEl = document.getElementById("demandes-message");
   messageEl.className = "";
@@ -1064,7 +1121,9 @@ async function chargerMesDemandes() {
     }
 
     messageEl.textContent = mentionCopie(dateCopie).trim();
-    demandes.forEach(d => {
+    const dejaConfirmesDemandes = await creditsDejaConfirmes();
+    let htmlDemandes = "";
+    for (const d of demandes) {
       let classeStatut = "badge";
       let texteStatut = "en attente";
       if (d.statut_traitement === "verifie") { classeStatut = "badge"; texteStatut = "verifie"; }
@@ -1073,17 +1132,20 @@ async function chargerMesDemandes() {
 
       const estApprouvee = d.resultat_message && d.resultat_message.includes("Approuvee") && d.credit_demande_ids;
       const premierCreditId = estApprouvee ? d.credit_demande_ids.split(",")[0].trim() : null;
+      const dejaConfirme = premierCreditId && dejaConfirmesDemandes.has(Number(premierCreditId));
 
-      conteneur.innerHTML += `
+      htmlDemandes += `
         <div class="ligne-attente" style="flex-direction:column; align-items:flex-start;">
           <div style="display:flex; justify-content:space-between; width:100%;">
             <span><b>Carnet ${echapper(d.numero_carnet)}</b></span>
             <span class="${classeStatut}">${texteStatut}</span>
           </div>
           ${d.resultat_message ? `<span style="font-size:13px; color:#212529; margin-top:4px;">${echapper(d.resultat_message)}</span>` : ""}
-          ${estApprouvee ? `<button style="margin-top:8px;" onclick="confirmerRemise('${echapper(d.id_local)}', ${Number(premierCreditId) || 0})">Confirmer la remise au client</button>` : ""}
+          ${estApprouvee && !dejaConfirme ? `<button style="margin-top:8px;" onclick="confirmerRemise('${echapper(d.id_local)}', ${Number(premierCreditId) || 0})">Confirmer la remise au client</button>` : ""}
+          ${dejaConfirme ? `<span style="font-size:13px; color:#198754; margin-top:6px;">Remise confirmee sur ce telephone.</span>` : ""}
         </div>`;
-    });
+    }
+    conteneur.innerHTML = htmlDemandes;
   } catch (erreur) {
     messageEl.className = "erreur";
     messageEl.textContent = "Impossible de charger, et aucune copie dans le telephone : ouvre cet ecran une fois avec internet.";
@@ -1092,6 +1154,10 @@ async function chargerMesDemandes() {
 
 async function confirmerRemise(idLocalDemande, creditId) {
   const session = await lireObjet("session", "agent");
+  if ((await creditsDejaConfirmes()).has(Number(creditId))) {
+    alert("La remise de ce credit est deja confirmee sur ce telephone.");
+    return;
+  }
   const idLocal = genererUUID();
 
   const confirmation = {
