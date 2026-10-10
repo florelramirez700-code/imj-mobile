@@ -415,7 +415,7 @@
     <div id="page-mes-retards" class="cache">
       <div class="carte">
         <h2>Mes clients en retard</h2>
-        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Liste mise a jour a chaque passage du pont (toutes les heures environ).</p>
+        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Liste mise a jour a chaque passage du pont (toutes les heures environ). La penalite court chaque jour ouvre des le lendemain de l'echeance ; elle se regle quand le credit est solde.</p>
         <button onclick="chargerMesRetards()">Actualiser</button>
         <div id="liste-retards" style="margin-top:14px;"></div>
         <p id="retards-message"></p>
@@ -446,7 +446,7 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.10.10-6";
+const VERSION_APP = "2026.10.10-7";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
@@ -1621,6 +1621,10 @@ async function chargerMesRetards() {
             <span class="badge" style="background:#FEE2E2; color:#991B1B;">${echapper(r.jours_retard)} j</span>
           </div>
           <span style="font-size:13px; color:#212529; margin-top:4px;">${echapper(r.type_produit)} -- Solde restant : ${echapper(r.solde_restant)} F</span>
+          ${Number(r.penalite_en_cours) > 0 ? `<span style="font-size:13px; color:#991B1B; margin-top:2px;">Penalite en cours : <b>${echapper(r.penalite_en_cours)} F</b></span>` : ""}
+          ${r.en_souffrance ? `<span class="badge" style="background:#DC2945; margin-top:4px;">EN SOUFFRANCE</span>` : ""}
+          ${r.plan_statut === "actif" ? `<span style="font-size:13px; color:#0D581A; margin-top:2px;">Plan de remboursement respecte : la penalite ne grandit plus.</span>` : ""}
+          ${r.plan_statut === "rompu" ? `<span style="font-size:13px; color:#991B1B; margin-top:2px;">Plan de remboursement ROMPU : previens le bureau.</span>` : ""}
         </div>`;
     });
     conteneur.innerHTML = htmlRetards;
