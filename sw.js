@@ -19,21 +19,33 @@ self.addEventListener("activate", (evenement) => {
   self.clients.claim();
 });
 
+// Au bout de DELAI_RESEAU_MS sans reponse (reseau qui accroche), on sert la copie gardee ;
+// la reponse du reseau, si elle arrive plus tard, met la copie a jour pour la prochaine fois.
+const DELAI_RESEAU_MS = 4000;
+
 self.addEventListener("fetch", (evenement) => {
   const requete = evenement.request;
   if (requete.method !== "GET" || new URL(requete.url).origin !== self.location.origin) return;
 
-  evenement.respondWith(
-    fetch(requete)
-      .then((reponse) => {
-        if (reponse.ok) {
-          const copie = reponse.clone();
-          caches.open(CACHE).then((cache) => cache.put(requete, copie));
-        }
-        return reponse;
-      })
-      .catch(() =>
-        caches.match(requete, { ignoreSearch: true }).then((enCache) => enCache || caches.match("index.html"))
-      )
-  );
+  const reseau = fetch(requete).then((reponse) => {
+    if (reponse.ok) {
+      const copie = reponse.clone();
+      caches.open(CACHE).then((cache) => cache.put(requete, copie));
+    }
+    return reponse;
+  });
+  evenement.waitUntil(reseau.catch(() => {}));
+
+  evenement.respondWith((async () => {
+    try {
+      return await Promise.race([
+        reseau,
+        new Promise((_, rejeter) => setTimeout(() => rejeter(new Error("delai")), DELAI_RESEAU_MS)),
+      ]);
+    } catch (erreur) {
+      const enCache = await caches.match(requete, { ignoreSearch: true }) || await caches.match("index.html");
+      if (enCache) return enCache;
+      return reseau;
+    }
+  })());
 });

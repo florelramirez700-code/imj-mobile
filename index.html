@@ -431,7 +431,7 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.10.10-2";
+const VERSION_APP = "2026.10.10-3";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
@@ -459,6 +459,29 @@ requeteDB.onsuccess = (e) => {
   db = e.target.result;
   verifierSessionExistante();
 };
+
+// Un reseau qui "accroche" sans couper ne doit pas bloquer l'ecran : au bout du delai, on passe a la copie gardee.
+async function fetchAvecDelai(url, options = {}, delaiMs = 30000) {
+  const controleur = new AbortController();
+  const minuteur = setTimeout(() => controleur.abort(), delaiMs);
+  try {
+    return await fetch(url, { ...options, signal: controleur.signal });
+  } finally {
+    clearTimeout(minuteur);
+  }
+}
+
+// Evite qu'un double appui lance deux fois la meme action (mise en double...).
+const actionsEnCours = new Set();
+async function unSeulALaFois(nom, action) {
+  if (actionsEnCours.has(nom)) return;
+  actionsEnCours.add(nom);
+  try {
+    return await action();
+  } finally {
+    actionsEnCours.delete(nom);
+  }
+}
 
 function supprimerObjet(magasin, cle) {
   return new Promise((resolve, reject) => {
@@ -522,10 +545,10 @@ async function lireAvecCopie(nom, cheminRequete) {
   const session = await lireObjet("session", "agent");
   const cle = `${nom}:${session.code}`;
   try {
-    const reponse = await fetch(`${SUPABASE_URL}/rest/v1/${cheminRequete}`, {
+    const reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/${cheminRequete}`, {
       headers: await enTetesAuth(),
       cache: "no-store"
-    });
+    }, 8000);
     if (!reponse.ok) throw new Error(`Reponse ${reponse.status}`);
     const donnees = await reponse.json();
     await stockerObjet("copies_ecrans", { cle: cle, donnees: donnees, date_copie: new Date().toISOString() });
@@ -562,10 +585,10 @@ async function chargerListeCarnets() {
 
 async function telechargerListeCarnets() {
   try {
-    const reponse = await fetch(`${SUPABASE_URL}/rest/v1/carnets_mobile?select=numero_carnet,code_agent,nom_client,type_carnet,mise`, {
+    const reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/carnets_mobile?select=numero_carnet,code_agent,nom_client,type_carnet,mise`, {
       headers: await enTetesAuth(),
       cache: "no-store"
-    });
+    }, 15000);
     if (reponse.ok) {
       const carnets = await reponse.json();
       // Une liste vide ne remplace jamais la copie : tous les numeros deviendraient "inconnus".
@@ -644,11 +667,11 @@ async function obtenirTokenValide() {
   // Le jeton a expire (ou va bientot expirer) -- on le rafraichit via le
   // refresh_token, SANS redemander le mot de passe. Necessite internet.
   try {
-    const reponse = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+    const reponse = await fetchAvecDelai(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
       method: "POST",
       headers: { apikey: SUPABASE_ANON_KEY, "Content-Type": "application/json" },
       body: JSON.stringify({ refresh_token: session.refresh_token }),
-    });
+    }, 8000);
     if (!reponse.ok) return session.access_token; // hors-ligne : on retente avec l'ancien, au pire ca echoue proprement plus loin
     const donnees = await reponse.json();
     session.access_token = donnees.access_token;
@@ -815,6 +838,10 @@ function base64VersBlob(base64DataUrl) {
 }
 
 async function enregistrerClient() {
+  return unSeulALaFois("client", enregistrerClientInterne);
+}
+
+async function enregistrerClientInterne() {
   const nom = document.getElementById("nc-nom").value.trim();
   const pasDeTelephone = document.getElementById("nc-pas-de-telephone").checked;
   let telephone = document.getElementById("nc-telephone").value.trim();
@@ -948,6 +975,10 @@ function afficherRappelFinCycle() {
 }
 
 async function enregistrerMise() {
+  return unSeulALaFois("mise", enregistrerMiseInterne);
+}
+
+async function enregistrerMiseInterne() {
   const mode = document.getElementById("m-mode").value;
   const montant = parseInt(document.getElementById("m-montant").value);
   const nombreSaisi = document.getElementById("m-nombre").value.trim();
@@ -1019,6 +1050,10 @@ async function enregistrerMise() {
 }
 
 async function enregistrerDemandeCredit() {
+  return unSeulALaFois("demande-credit", enregistrerDemandeCreditInterne);
+}
+
+async function enregistrerDemandeCreditInterne() {
   const carnet = parseInt(document.getElementById("cr-carnet").value);
   const messageEl = document.getElementById("cr-message");
   messageEl.className = "erreur";
@@ -1143,7 +1178,7 @@ async function chargerMesDemandes() {
             <span class="${classeStatut}">${texteStatut}</span>
           </div>
           ${d.resultat_message ? `<span style="font-size:13px; color:#212529; margin-top:4px;">${echapper(d.resultat_message)}</span>` : ""}
-          ${estApprouvee && !dejaConfirme ? `<button style="margin-top:8px;" onclick="confirmerRemise('${echapper(d.id_local)}', ${Number(premierCreditId) || 0})">Confirmer la remise au client</button>` : ""}
+          ${estApprouvee && !dejaConfirme ? `<span style="font-size:13px; color:#92400E; margin-top:6px;">Credit approuve. Il apparaitra dans « Credits a remettre au client » (en haut) quand la caissiere t'aura remis l'argent.</span>` : ""}
           ${dejaConfirme ? `<span style="font-size:13px; color:#198754; margin-top:6px;">Remise confirmee sur ce telephone.</span>` : ""}
         </div>`;
     }
@@ -1155,6 +1190,10 @@ async function chargerMesDemandes() {
 }
 
 async function confirmerRemise(idLocalDemande, creditId) {
+  return unSeulALaFois("remise-" + creditId, () => confirmerRemiseInterne(idLocalDemande, creditId));
+}
+
+async function confirmerRemiseInterne(idLocalDemande, creditId) {
   const session = await lireObjet("session", "agent");
   if ((await creditsDejaConfirmes()).has(Number(creditId))) {
     alert("La remise de ce credit est deja confirmee sur ce telephone.");
@@ -1184,10 +1223,10 @@ async function telechargerClientsRecherche() {
   // "+Carnet" -- a appeler a chaque synchronisation (necessite internet),
   // stocke en cache local pour un usage plus tard sans reseau.
   try {
-    const reponse = await fetch(`${SUPABASE_URL}/rest/v1/clients_recherche_mobile?select=*`, {
+    const reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/clients_recherche_mobile?select=*`, {
       headers: await enTetesAuth(),
       cache: "no-store"
-    });
+    }, 20000);
     if (!reponse.ok) return;
     const tousLesClients = await reponse.json();
     for (const client of tousLesClients) {
@@ -1212,10 +1251,10 @@ async function chercherClientExistant() {
   }
 
   try {
-    const reponse = await fetch(`${SUPABASE_URL}/rest/v1/clients_recherche_mobile?telephone=eq.${encodeURIComponent(telephone)}`, {
+    const reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/clients_recherche_mobile?telephone=eq.${encodeURIComponent(telephone)}`, {
       headers: await enTetesAuth(),
       cache: "no-store"
-    });
+    }, 8000);
     const resultats = await reponse.json();
 
     if (!resultats.length) {
@@ -1252,6 +1291,10 @@ function changerTypeOperationCarnet() {
 }
 
 async function enregistrerOperationCarnet() {
+  return unSeulALaFois("operation-carnet", enregistrerOperationCarnetInterne);
+}
+
+async function enregistrerOperationCarnetInterne() {
   const type = document.getElementById("gc-type-operation").value;
   const messageEl = document.getElementById("gc-message");
   messageEl.className = "erreur";
@@ -1317,6 +1360,7 @@ async function chargerMesClientsRecents() {
     }
 
     messageEl.textContent = mentionCopie(dateCopie).trim();
+    let htmlClients = "";
     clientsRecents.forEach(c => {
       let statutAffiche = "En attente de traitement au bureau";
       let couleurBadge = "background:#FEF3C7; color:#92400E;";
@@ -1327,12 +1371,13 @@ async function chargerMesClientsRecents() {
         statutAffiche = "Erreur -- a verifier au bureau";
         couleurBadge = "background:#FEE2E2; color:#991B1B;";
       }
-      conteneur.innerHTML += `
+      htmlClients += `
         <div class="ligne-attente" style="flex-direction:column; align-items:flex-start;">
           <span><b>${echapper(c.nom)} ${echapper(c.prenom)}</b></span>
           <span class="badge" style="${couleurBadge} margin-top:4px;">${statutAffiche}</span>
         </div>`;
     });
+    conteneur.innerHTML = htmlClients;
   } catch (erreur) {
     messageEl.className = "erreur";
     messageEl.textContent = "Impossible de charger, et aucune copie dans le telephone : ouvre cet ecran une fois avec internet.";
@@ -1361,9 +1406,10 @@ async function chargerMesPenalites() {
     const idsDejaConfirmes = confirmationsLocales.map(c => c.penalite_id);
 
     messageEl.textContent = mentionCopie(dateCopie).trim();
+    let htmlPenalites = "";
     penalites.forEach(p => {
       const dejaConfirme = idsDejaConfirmes.includes(p.penalite_id);
-      conteneur.innerHTML += `
+      htmlPenalites += `
         <div class="ligne-attente" style="flex-direction:column; align-items:flex-start;">
           <div style="display:flex; justify-content:space-between; width:100%;">
             <span><b>${echapper(p.nom_client)}</b></span>
@@ -1375,6 +1421,7 @@ async function chargerMesPenalites() {
             : `<button style="margin-top:8px;" onclick="confirmerPenalite(${Number(p.penalite_id) || 0})">Confirmer reglee</button>`}
         </div>`;
     });
+    conteneur.innerHTML = htmlPenalites;
   } catch (erreur) {
     messageEl.className = "erreur";
     messageEl.textContent = "Impossible de charger, et aucune copie dans le telephone : ouvre cet ecran une fois avec internet.";
@@ -1382,7 +1429,15 @@ async function chargerMesPenalites() {
 }
 
 async function confirmerPenalite(penaliteId) {
+  return unSeulALaFois("penalite-" + penaliteId, () => confirmerPenaliteInterne(penaliteId));
+}
+
+async function confirmerPenaliteInterne(penaliteId) {
   const session = await lireObjet("session", "agent");
+  if ((await listerObjets("confirmations_penalite")).some(c => Number(c.penalite_id) === Number(penaliteId))) {
+    alert("La confirmation de cette penalite est deja enregistree sur ce telephone.");
+    return;
+  }
   const idLocal = genererUUID();
 
   const confirmation = {
@@ -1402,6 +1457,10 @@ async function confirmerPenalite(penaliteId) {
 }
 
 async function enregistrerFermetureVolontaire() {
+  return unSeulALaFois("fermeture", enregistrerFermetureVolontaireInterne);
+}
+
+async function enregistrerFermetureVolontaireInterne() {
   const carnet = parseInt(document.getElementById("fc-carnet").value);
   const messageEl = document.getElementById("fc-message");
   messageEl.className = "erreur";
@@ -1458,7 +1517,7 @@ async function chargerMonRapport() {
       <div class="ligne-attente"><span>Date</span><span><b>${echapper(r.date_rapport)}</b></span></div>
       <div class="ligne-attente"><span>Total collecte</span><span><b>${echapper(r.total_collecte)} F</b></span></div>
       <div class="ligne-attente"><span>Fiches traitees</span><span><b>${echapper(r.nombre_fiches)}</b></span></div>
-      <div class="ligne-attente"><span>Mises gagnees (nouveaux clients)</span><span><b>${echapper(r.mises_gagnees_nombre)} -- ${echapper(r.mises_gagnees_total)} F</b></span></div>
+      <div class="ligne-attente"><span>Mises gagnees (pages commencees)</span><span><b>${echapper(r.mises_gagnees_nombre)} -- ${echapper(r.mises_gagnees_total)} F</b></span></div>
       <div class="ligne-attente"><span>Interets prets collectes</span><span><b>${echapper(r.interets_prets_collectes)} F</b></span></div>
     `;
   } catch (erreur) {
@@ -1486,8 +1545,9 @@ async function chargerMesRetards() {
     }
 
     messageEl.textContent = mentionCopie(dateCopie).trim();
+    let htmlRetards = "";
     retards.forEach(r => {
-      conteneur.innerHTML += `
+      htmlRetards += `
         <div class="ligne-attente" style="flex-direction:column; align-items:flex-start;">
           <div style="display:flex; justify-content:space-between; width:100%;">
             <span><b>Carnet ${echapper(r.numero_carnet)}</b> -- ${echapper(r.nom_client)}</span>
@@ -1496,6 +1556,7 @@ async function chargerMesRetards() {
           <span style="font-size:13px; color:#212529; margin-top:4px;">${echapper(r.type_produit)} -- Solde restant : ${echapper(r.solde_restant)} F</span>
         </div>`;
     });
+    conteneur.innerHTML = htmlRetards;
   } catch (erreur) {
     messageEl.className = "erreur";
     messageEl.textContent = "Impossible de charger, et aucune copie dans le telephone : ouvre cet ecran une fois avec internet.";
@@ -1687,13 +1748,14 @@ async function synchroniser() {
     delete corps.synchronise;
     delete corps.photo_base64;
     try {
-      const reponse = await fetch(`${SUPABASE_URL}/rest/v1/clients_mobile?on_conflict=id_local`, {
+      const reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/clients_mobile?on_conflict=id_local`, {
         method: "POST",
         headers: { ...headers, Prefer: "resolution=ignore-duplicates" },
         body: JSON.stringify(corps)
-      });
+      }, 30000);
       if (reponse.ok) {
         client.synchronise = true;
+        if (client.photo_url) client.photo_base64 = null; // envoyee : inutile de la garder (elle alourdit chaque ecran)
         await stockerObjet("clients", client);
         envoyes++;
       } else {
@@ -1712,11 +1774,11 @@ async function synchroniser() {
     const corps = { ...mise };
     delete corps.synchronise;
     try {
-      const reponse = await fetch(`${SUPABASE_URL}/rest/v1/mises_mobile?on_conflict=id_local`, {
+      const reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/mises_mobile?on_conflict=id_local`, {
         method: "POST",
         headers: { ...headers, Prefer: "resolution=ignore-duplicates" },
         body: JSON.stringify(corps)
-      });
+      }, 30000);
       if (reponse.ok) {
         mise.synchronise = true;
         await stockerObjet("mises", mise);
@@ -1738,11 +1800,11 @@ async function synchroniser() {
       const corps = { ...trace };
       delete corps.synchronise;
       try {
-        const reponse = await fetch(`${SUPABASE_URL}/rest/v1/${table}?on_conflict=id_local`, {
+        const reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/${table}?on_conflict=id_local`, {
           method: "POST",
           headers: { ...headers, Prefer: "resolution=ignore-duplicates" },
           body: JSON.stringify(corps)
-        });
+        }, 30000);
         if (reponse.ok) {
           trace.synchronise = true;
           await stockerObjet(magasin, trace);
@@ -1764,11 +1826,11 @@ async function synchroniser() {
     const corps = { ...demande };
     delete corps.synchronise;
     try {
-      const reponse = await fetch(`${SUPABASE_URL}/rest/v1/demandes_credit_mobile?on_conflict=id_local`, {
+      const reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/demandes_credit_mobile?on_conflict=id_local`, {
         method: "POST",
         headers: { ...headers, Prefer: "resolution=ignore-duplicates" },
         body: JSON.stringify(corps)
-      });
+      }, 30000);
       if (reponse.ok) {
         demande.synchronise = true;
         await stockerObjet("demandes_credit", demande);
@@ -1789,11 +1851,11 @@ async function synchroniser() {
     const corps = { ...confirmation };
     delete corps.synchronise;
     try {
-      const reponse = await fetch(`${SUPABASE_URL}/rest/v1/confirmations_remise_mobile?on_conflict=id_local`, {
+      const reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/confirmations_remise_mobile?on_conflict=id_local`, {
         method: "POST",
         headers: { ...headers, Prefer: "resolution=ignore-duplicates" },
         body: JSON.stringify(corps)
-      });
+      }, 30000);
       if (reponse.ok) {
         confirmation.synchronise = true;
         await stockerObjet("confirmations_remise", confirmation);
@@ -1814,11 +1876,11 @@ async function synchroniser() {
     const corps = { ...fermeture };
     delete corps.synchronise;
     try {
-      const reponse = await fetch(`${SUPABASE_URL}/rest/v1/fermetures_volontaires_mobile?on_conflict=id_local`, {
+      const reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/fermetures_volontaires_mobile?on_conflict=id_local`, {
         method: "POST",
         headers: { ...headers, Prefer: "resolution=ignore-duplicates" },
         body: JSON.stringify(corps)
-      });
+      }, 30000);
       if (reponse.ok) {
         fermeture.synchronise = true;
         await stockerObjet("fermetures_volontaires", fermeture);
@@ -1839,11 +1901,11 @@ async function synchroniser() {
     const corps = { ...reprise };
     delete corps.synchronise;
     try {
-      const reponse = await fetch(`${SUPABASE_URL}/rest/v1/reprise_historique_mobile?on_conflict=id_local`, {
+      const reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/reprise_historique_mobile?on_conflict=id_local`, {
         method: "POST",
         headers: { ...headers, Prefer: "resolution=ignore-duplicates" },
         body: JSON.stringify(corps)
-      });
+      }, 30000);
       if (reponse.ok) {
         reprise.synchronise = true;
         await stockerObjet("reprises_historiques", reprise);
@@ -1864,11 +1926,11 @@ async function synchroniser() {
     const corps = { ...rattrapage };
     delete corps.synchronise;
     try {
-      const reponse = await fetch(`${SUPABASE_URL}/rest/v1/rattrapage_mobile?on_conflict=id_local`, {
+      const reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/rattrapage_mobile?on_conflict=id_local`, {
         method: "POST",
         headers: { ...headers, Prefer: "resolution=ignore-duplicates" },
         body: JSON.stringify(corps)
-      });
+      }, 30000);
       if (reponse.ok) {
         rattrapage.synchronise = true;
         await stockerObjet("rattrapages", rattrapage);
@@ -1889,11 +1951,11 @@ async function synchroniser() {
     const corps = { ...confirmation };
     delete corps.synchronise;
     try {
-      const reponse = await fetch(`${SUPABASE_URL}/rest/v1/confirmations_penalite_mobile?on_conflict=id_local`, {
+      const reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/confirmations_penalite_mobile?on_conflict=id_local`, {
         method: "POST",
         headers: { ...headers, Prefer: "resolution=ignore-duplicates" },
         body: JSON.stringify(corps)
-      });
+      }, 30000);
       if (reponse.ok) {
         confirmation.synchronise = true;
         await stockerObjet("confirmations_penalite", confirmation);
@@ -1914,11 +1976,11 @@ async function synchroniser() {
     const corps = { ...operation };
     delete corps.synchronise;
     try {
-      const reponse = await fetch(`${SUPABASE_URL}/rest/v1/operations_carnet_mobile?on_conflict=id_local`, {
+      const reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/operations_carnet_mobile?on_conflict=id_local`, {
         method: "POST",
         headers: { ...headers, Prefer: "resolution=ignore-duplicates" },
         body: JSON.stringify(corps)
-      });
+      }, 30000);
       if (reponse.ok) {
         operation.synchronise = true;
         await stockerObjet("operations_carnet", operation);
@@ -1938,6 +2000,9 @@ async function synchroniser() {
   let texteResume = `${envoyes} element(s) synchronise(s), ${echecs} echec(s).`;
   if (detailsErreurs.length > 0) {
     texteResume += "<br><br><b>Detail des erreurs :</b><br>" + detailsErreurs.map(d => d.replace(/</g, "&lt;")).join("<br>");
+  }
+  if (detailsErreurs.some(d => d.includes("HTTP 401"))) {
+    texteResume += "<br><br><b>Ta connexion a expire.</b> Appuie sur « Sortir » puis reconnecte-toi avec Internet. Tout ce que tu as saisi reste dans le telephone et partira apres.";
   }
   messageEl.innerHTML = texteResume;
   rafraichirListeAttente();
