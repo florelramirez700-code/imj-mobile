@@ -5,7 +5,8 @@
 // sans internet, on sert la derniere copie gardee.
 // Les appels a Supabase (autre adresse) ne sont JAMAIS touches ni gardes.
 const CACHE = "imj-mobile-v1";
-const FICHIERS = ["./", "index.html", "manifest.json", "logo.png"];
+// pointage.html : la page du telephone de pointage du bureau, qui doit s'ouvrir meme pendant une coupure.
+const FICHIERS = ["./", "index.html", "manifest.json", "logo.png", "pointage.html", "manifest-pointage.json"];
 
 self.addEventListener("install", (evenement) => {
   evenement.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(FICHIERS)));

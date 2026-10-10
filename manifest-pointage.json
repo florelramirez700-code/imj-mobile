@@ -1,0 +1,22 @@
+{
+  "id": "pointage.html",
+  "name": "IMJ Pointage du bureau",
+  "short_name": "IMJ Pointage",
+  "start_url": "pointage.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F6F9FB",
+  "theme_color": "#002A7D",
+  "icons": [
+    {
+      "src": "logo.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "logo.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
