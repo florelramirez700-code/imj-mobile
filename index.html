@@ -446,7 +446,7 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.10.10-5";
+const VERSION_APP = "2026.10.10-6";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
@@ -586,16 +586,20 @@ function mentionCopie(dateCopie) {
 // Liste des carnets du bureau (numero -> client), gardee dans le telephone. Elle
 // sert a montrer le nom du client des que l'agent tape un numero, meme sans
 // reseau : il n'y a plus de fiche papier pour rattraper un numero mal tape.
+// Confidentialite : le telephone ne recoit les NOMS que de ses propres carnets (carnetsConnus).
+// Pour les carnets des autres agents il recoit seulement le numero et le code de l'agent (autresCarnets).
 let carnetsConnus = new Map();
+let autresCarnets = new Map();
 let dateListeCarnets = null;
 let codeAgentConnecte = null;
 const CHAMPS_NUMERO_CARNET = ["m-carnet", "cr-carnet", "fc-carnet"];
 
 async function chargerListeCarnets() {
   const copie = await lireObjet("copies_ecrans", "carnets");
-  if (!copie) return;
-  carnetsConnus = new Map(copie.donnees.map(c => [Number(c.numero_carnet), c]));
-  dateListeCarnets = copie.date_copie;
+  const copieNumeros = await lireObjet("copies_ecrans", "numeros_carnets");
+  carnetsConnus = copie ? new Map(copie.donnees.map(c => [Number(c.numero_carnet), c])) : new Map();
+  autresCarnets = copieNumeros ? new Map(copieNumeros.donnees.map(c => [Number(c.numero_carnet), c])) : new Map();
+  dateListeCarnets = copie ? copie.date_copie : (copieNumeros ? copieNumeros.date_copie : null);
 }
 
 async function telechargerListeCarnets() {
@@ -609,6 +613,16 @@ async function telechargerListeCarnets() {
       // Une liste vide ne remplace jamais la copie : tous les numeros deviendraient "inconnus".
       if (Array.isArray(carnets) && carnets.length) {
         await stockerObjet("copies_ecrans", { cle: "carnets", donnees: carnets, date_copie: new Date().toISOString() });
+      }
+    }
+    const reponseNumeros = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/numeros_carnets_mobile?select=numero_carnet,code_agent`, {
+      headers: await enTetesAuth(),
+      cache: "no-store"
+    }, 15000);
+    if (reponseNumeros.ok) {
+      const numeros = await reponseNumeros.json();
+      if (Array.isArray(numeros) && numeros.length) {
+        await stockerObjet("copies_ecrans", { cle: "numeros_carnets", donnees: numeros, date_copie: new Date().toISOString() });
       }
     }
   } catch (erreur) {
@@ -631,7 +645,16 @@ function decrireCarnet(numero) {
       couleur: autreAgent ? "#E99A0C" : "#0D581A",
     };
   }
-  if (!carnetsConnus.size) return { carnet: null, texte: "", couleur: "" };
+  if (!carnetsConnus.size && !autresCarnets.size) return { carnet: null, texte: "", couleur: "" };
+  const autre = autresCarnets.get(Number(numero));
+  if (autre && autre.code_agent !== codeAgentConnecte) {
+    return {
+      carnet: null,
+      autreAgent: autre.code_agent,
+      texte: `Ce carnet est suivi par ${autre.code_agent}, pas par toi. Verifie le numero.`,
+      couleur: "#E99A0C",
+    };
+  }
   return {
     carnet: null,
     texte: `Numero inconnu au bureau (${mentionCopie(dateListeCarnets).trim().replace("Sans reseau : copie", "liste").replace(/\.$/, "")}). Verifie le numero.`,
@@ -653,7 +676,11 @@ CHAMPS_NUMERO_CARNET.forEach(idChamp => {
 
 // Avant d'enregistrer sur un numero que le bureau ne connait pas : l'agent confirme.
 function numeroCarnetAccepte(numero) {
-  if (decrireCarnet(numero).carnet || !carnetsConnus.size) return true;
+  const description = decrireCarnet(numero);
+  if (description.carnet || (!carnetsConnus.size && !autresCarnets.size)) return true;
+  if (description.autreAgent) {
+    return confirm(`Le carnet ${numero} est suivi par ${description.autreAgent}, pas par toi.\n\nSi le numero est mal tape, appuie sur Annuler et corrige.\nSi le bureau t'a confie ce client, appuie sur OK.`);
+  }
   return confirm(`Le carnet ${numero} n'est pas dans la liste du bureau.\n\nSi le numero est mal tape, appuie sur Annuler et corrige.\nSi c'est un carnet que le bureau n'a pas encore enregistre, appuie sur OK.`);
 }
 
