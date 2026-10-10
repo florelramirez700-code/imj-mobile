@@ -148,6 +148,8 @@
     <button class="secondaire" style="width:auto; padding:6px 12px; font-size:12px;" onclick="seDeconnecter()">Sortir</button>
   </header>
 
+  <div id="bandeau-heure" class="cache" style="background:#F8D7DA; border-bottom:1px solid #DC2945; color:#842029; padding:10px 14px; font-size:13px; font-weight:600;"></div>
+
   <div id="bandeau-envoi" class="cache">
     <div id="bandeau-envoi-texte"></div>
     <div class="actions">
@@ -446,7 +448,7 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.10.10-7";
+const VERSION_APP = "2026.10.10-8";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
@@ -496,6 +498,51 @@ async function unSeulALaFois(nom, action) {
   } finally {
     actionsEnCours.delete(nom);
   }
+}
+
+// ---- L'heure du telephone -------------------------------------------------
+// La date d'une mise vient de l'horloge du telephone : si elle est fausse, la mise part sur le
+// mauvais jour. A chaque connexion, le serveur ecrit son heure dans le jeton (champ "iat") : on
+// en deduit l'ecart, on corrige les dates enregistrees, et on previent l'agent.
+let decalageHorlogeMs = 0;
+const ECART_HORLOGE_SIGNALE_MS = 5 * 60 * 1000;
+const ECART_HORLOGE_CORRIGE_MS = 2 * 60 * 1000;
+
+function maintenant() {
+  return new Date(Date.now() + (Math.abs(decalageHorlogeMs) >= ECART_HORLOGE_CORRIGE_MS ? decalageHorlogeMs : 0));
+}
+
+// Ecart (heure du serveur - heure du telephone) lu dans un jeton qui vient d'etre recu, ou null.
+function ecartHorlogeDuJeton(jeton) {
+  try {
+    const partie = jeton.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const iat = JSON.parse(atob(partie)).iat;
+    return typeof iat === "number" ? iat * 1000 - Date.now() : null;
+  } catch (erreur) {
+    return null;
+  }
+}
+
+function afficherBandeauHeure() {
+  const bandeau = document.getElementById("bandeau-heure");
+  if (!bandeau) return;
+  const fausse = Math.abs(decalageHorlogeMs) >= ECART_HORLOGE_SIGNALE_MS;
+  bandeau.className = fausse ? "visible" : "cache";
+  if (fausse) {
+    const minutes = Math.round(Math.abs(decalageHorlogeMs) / 60000);
+    const ecart = minutes >= 120 ? `${Math.round(minutes / 60)} heures` : `${minutes} minutes`;
+    const sens = decalageHorlogeMs > 0 ? "en retard" : "en avance";
+    bandeau.textContent = `L'heure de ton telephone est fausse (${ecart} ${sens}). Regle-la dans les reglages du telephone (date et heure automatiques). En attendant, tes saisies sont datees avec l'heure du bureau.`;
+  }
+}
+
+// A appeler des qu'un jeton vient d'etre recu du serveur (connexion ou renouvellement).
+function mesurerHorloge(session) {
+  const ecart = ecartHorlogeDuJeton(session.access_token);
+  if (ecart === null) return;
+  session.decalage_horloge_ms = ecart;
+  decalageHorlogeMs = ecart;
+  afficherBandeauHeure();
 }
 
 function supprimerObjet(magasin, cle) {
@@ -566,7 +613,7 @@ async function lireAvecCopie(nom, cheminRequete) {
     }, 8000);
     if (!reponse.ok) throw new Error(`Reponse ${reponse.status}`);
     const donnees = await reponse.json();
-    await stockerObjet("copies_ecrans", { cle: cle, donnees: donnees, date_copie: new Date().toISOString() });
+    await stockerObjet("copies_ecrans", { cle: cle, donnees: donnees, date_copie: maintenant().toISOString() });
     return { donnees: donnees, dateCopie: null };
   } catch (erreur) {
     const copie = await lireObjet("copies_ecrans", cle);
@@ -612,7 +659,7 @@ async function telechargerListeCarnets() {
       const carnets = await reponse.json();
       // Une liste vide ne remplace jamais la copie : tous les numeros deviendraient "inconnus".
       if (Array.isArray(carnets) && carnets.length) {
-        await stockerObjet("copies_ecrans", { cle: "carnets", donnees: carnets, date_copie: new Date().toISOString() });
+        await stockerObjet("copies_ecrans", { cle: "carnets", donnees: carnets, date_copie: maintenant().toISOString() });
       }
     }
     const reponseNumeros = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/numeros_carnets_mobile?select=numero_carnet,code_agent`, {
@@ -622,7 +669,7 @@ async function telechargerListeCarnets() {
     if (reponseNumeros.ok) {
       const numeros = await reponseNumeros.json();
       if (Array.isArray(numeros) && numeros.length) {
-        await stockerObjet("copies_ecrans", { cle: "numeros_carnets", donnees: numeros, date_copie: new Date().toISOString() });
+        await stockerObjet("copies_ecrans", { cle: "numeros_carnets", donnees: numeros, date_copie: maintenant().toISOString() });
       }
     }
   } catch (erreur) {
@@ -736,6 +783,7 @@ async function obtenirTokenValide() {
     session.access_token = donnees.access_token;
     session.refresh_token = donnees.refresh_token;
     session.expires_at = Date.now() + donnees.expires_in * 1000;
+    mesurerHorloge(session);
     await stockerObjet("session", session);
     return session.access_token;
   } catch (e) {
@@ -797,6 +845,7 @@ async function seConnecter() {
       refresh_token: donnees.refresh_token,
       expires_at: Date.now() + donnees.expires_in * 1000,
     };
+    mesurerHorloge(session);
     await stockerObjet("session", session);
     afficherApp(session);
 
@@ -825,6 +874,8 @@ function afficherApp(session) {
   document.getElementById("ecran-connexion").className = "cache";
   document.getElementById("ecran-app").className = "visible";
   codeAgentConnecte = session.code;
+  decalageHorlogeMs = Number(session.decalage_horloge_ms) || 0;
+  afficherBandeauHeure();
   rafraichirListeAttente();
   rafraichirListeClientsLocaux();
   chargerListeCarnets().then(telechargerListeCarnets);
@@ -967,8 +1018,8 @@ async function enregistrerClientInterne() {
     lien_parente_tuteur: document.getElementById("nc-lien-parente").value.trim() || null,
     photo_base64: photoBase64,
     photo_url: null,
-    date_creation: new Date().toISOString().split("T")[0],
-    created_at: new Date().toISOString(),
+    date_creation: maintenant().toISOString().split("T")[0],
+    created_at: maintenant().toISOString(),
     statut_import: "en_attente",
     synchronise: false
   };
@@ -1027,7 +1078,7 @@ async function televerserPhoto(blob, nomFichier) {
 }
 
 function afficherRappelFinCycle() {
-  const aujourdhui = new Date();
+  const aujourdhui = maintenant();
   const dateFin = new Date(aujourdhui);
   dateFin.setDate(dateFin.getDate() + 30);
   const dateFinTexte = dateFin.toLocaleDateString("fr-FR");
@@ -1072,8 +1123,8 @@ async function enregistrerMiseInterne() {
     id_local_client: null,
     montant_unitaire: montant,
     nombre_mise: nombre,
-    date_saisie: new Date().toISOString().split("T")[0],
-    created_at: new Date().toISOString(),
+    date_saisie: maintenant().toISOString().split("T")[0],
+    created_at: maintenant().toISOString(),
     statut_import: "en_attente",
     synchronise: false
   };
@@ -1138,8 +1189,8 @@ async function enregistrerDemandeCreditInterne() {
     agent_id: session.code,
     numero_carnet: carnet,
     commentaire: document.getElementById("cr-commentaire").value.trim(),
-    date_demande: new Date().toISOString().split("T")[0],
-    created_at: new Date().toISOString(),
+    date_demande: maintenant().toISOString().split("T")[0],
+    created_at: maintenant().toISOString(),
     statut_traitement: "en_attente",
     synchronise: false
   };
@@ -1272,8 +1323,8 @@ async function confirmerRemiseInterne(idLocalDemande, creditId) {
     id_local: idLocal,
     agent_id: session.code,
     credit_id: creditId,
-    date_confirmation: new Date().toISOString().split("T")[0],
-    created_at: new Date().toISOString(),
+    date_confirmation: maintenant().toISOString().split("T")[0],
+    created_at: maintenant().toISOString(),
     statut_import: "en_attente",
     synchronise: false
   };
@@ -1372,8 +1423,8 @@ async function enregistrerOperationCarnetInterne() {
     id_local: idLocal,
     agent_id: session.code,
     type_operation: type,
-    date_operation: new Date().toISOString().split("T")[0],
-    created_at: new Date().toISOString(),
+    date_operation: maintenant().toISOString().split("T")[0],
+    created_at: maintenant().toISOString(),
     statut_import: "en_attente",
     synchronise: false
   };
@@ -1511,8 +1562,8 @@ async function confirmerPenaliteInterne(penaliteId) {
     id_local: idLocal,
     agent_id: session.code,
     penalite_id: penaliteId,
-    date_confirmation: new Date().toISOString().split("T")[0],
-    created_at: new Date().toISOString(),
+    date_confirmation: maintenant().toISOString().split("T")[0],
+    created_at: maintenant().toISOString(),
     statut_import: "en_attente",
     synchronise: false
   };
@@ -1545,8 +1596,8 @@ async function enregistrerFermetureVolontaireInterne() {
     agent_id: session.code,
     numero_carnet: carnet,
     motif: document.getElementById("fc-motif").value.trim(),
-    date_demande: new Date().toISOString().split("T")[0],
-    created_at: new Date().toISOString(),
+    date_demande: maintenant().toISOString().split("T")[0],
+    created_at: maintenant().toISOString(),
     statut_import: "en_attente",
     synchronise: false
   };
@@ -1696,7 +1747,7 @@ async function supprimerMiseEnAttente(idLocal) {
     nombre_mise: mise.nombre_mise,
     date_saisie: mise.date_saisie,
     saisie_le: mise.created_at,
-    supprimee_le: new Date().toISOString(),
+    supprimee_le: maintenant().toISOString(),
     synchronise: false
   });
   await supprimerObjet("mises", idLocal);
@@ -1717,7 +1768,7 @@ async function signalerErreurMise(idLocalMise, numeroCarnet, montantUnitaire, no
     nombre_mise: nombreMise,
     date_saisie: dateSaisie,
     description: description.trim().slice(0, 300),
-    created_at: new Date().toISOString(),
+    created_at: maintenant().toISOString(),
     synchronise: false
   });
   alert("Erreur enregistree. Elle sera envoyee au bureau a la prochaine synchronisation.");
