@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>IMJ Pointage</title>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<link rel="manifest" href="manifest-pointage.json">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { overscroll-behavior-y: contain; }
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; background: #F6F9FB; color: #212529; }
+  .cache { display: none; }
+  header { background: #002A7D; color: white; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; }
+  header h1 { font-size: 18px; font-weight: 600; }
+  header .version { font-size: 11px; opacity: 0.7; }
+  main { padding: 16px; max-width: 520px; margin: 0 auto; }
+  .carte { background: white; border-radius: 12px; border: 1px solid #E4E9F0; padding: 18px; margin-bottom: 14px; }
+  .carte h2 { font-size: 17px; margin-bottom: 10px; color: #0548B3; }
+  .carte p { font-size: 14px; line-height: 1.45; }
+  input { width: 100%; padding: 14px 12px; border: 1px solid #E4E9F0; border-radius: 8px; font-size: 18px; background: #F2F2F1; margin-top: 12px; }
+  button { width: 100%; padding: 15px; background: #005FDE; color: white; border: none; border-radius: 8px; font-size: 17px; font-weight: 600; margin-top: 14px; cursor: pointer; }
+  button.secondaire { background: transparent; color: #5C6370; border: 1px solid #9B9CA1; }
+  .erreur { color: #DC2945; font-size: 15px; margin-top: 10px; font-weight: 600; }
+  #horloge { font-size: 54px; font-weight: 700; text-align: center; color: #002A7D; letter-spacing: 1px; }
+  #date-du-jour { text-align: center; font-size: 15px; color: #5C6370; margin-bottom: 4px; text-transform: capitalize; }
+  .bandeau { padding: 10px 14px; font-size: 13px; border-bottom: 1px solid transparent; }
+  .bandeau.jaune { background: #FFF3CD; border-color: #FFC107; color: #664D03; }
+  .bandeau.rouge { background: #F8D7DA; border-color: #DC2945; color: #842029; font-weight: 600; }
+  .bandeau.vert { background: #E3F4E6; border-color: #9BD3A5; color: #0D581A; }
+  .bouton-agent {
+    display: flex; justify-content: space-between; align-items: center; text-align: left;
+    background: white; color: #212529; border: 2px solid #005FDE; padding: 18px 16px; margin-top: 12px; font-size: 18px;
+  }
+  .bouton-agent .code { display: block; font-size: 12px; font-weight: 500; color: #5C6370; margin-top: 2px; }
+  .bouton-agent .arrivee { font-size: 14px; color: #0D581A; text-align: right; white-space: nowrap; margin-left: 10px; }
+  .bouton-agent .arrivee small { display: block; color: #8A6D00; font-weight: 500; }
+  .bouton-agent.pointe { border-color: #9BD3A5; background: #F3FAF4; }
+  #confirmation { text-align: center; padding: 34px 18px; }
+  #confirmation .coche { font-size: 70px; color: #0D581A; line-height: 1; }
+  #confirmation .nom { font-size: 22px; font-weight: 700; margin-top: 10px; }
+  #confirmation .heure { font-size: 40px; font-weight: 700; color: #002A7D; margin-top: 6px; }
+  #confirmation .detail { font-size: 14px; color: #5C6370; margin-top: 12px; line-height: 1.45; }
+  #pied { font-size: 12px; color: #5C6370; text-align: center; margin: 6px 0 24px; line-height: 1.5; }
+  #pied a { color: #005FDE; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>IMJ — Pointage du bureau</h1>
+  <span class="version" id="version"></span>
+</header>
+
+<div id="bandeau-reglage" class="bandeau rouge cache"></div>
+<div id="bandeau-horloge" class="bandeau rouge cache"></div>
+<div id="bandeau-batterie" class="bandeau rouge cache"></div>
+<div id="bandeau-reseau" class="bandeau cache"></div>
+
+<main>
+  <!-- 1. Reglage du telephone : une seule fois, par la directrice -->
+  <section id="ecran-reglage" class="cache">
+    <div class="carte">
+      <h2>Régler ce téléphone</h2>
+      <p>Ce téléphone sert au pointage des agents au bureau. La directrice tape ici, une seule fois, le mot de passe du téléphone de pointage (celui qu'elle a choisi dans IMJ Core, page « Présence des agents »).</p>
+      <input type="password" id="reglage-mdp" placeholder="Mot de passe du téléphone" autocomplete="new-password">
+      <button onclick="reglerTelephone()">Régler ce téléphone</button>
+      <div class="erreur" id="reglage-message"></div>
+      <button class="secondaire cache" id="reglage-retour" onclick="afficherEcran('liste')">Retour</button>
+    </div>
+  </section>
+
+  <!-- 2. La liste des agents -->
+  <section id="ecran-liste" class="cache">
+    <div class="carte">
+      <div id="date-du-jour"></div>
+      <div id="horloge">--:--</div>
+    </div>
+    <div class="carte">
+      <h2>Touche ton nom pour pointer ton arrivée</h2>
+      <div id="liste-agents"></div>
+      <div class="erreur" id="liste-message"></div>
+    </div>
+    <div id="pied"></div>
+  </section>
+
+  <!-- 3. L'agent tape son mot de passe -->
+  <section id="ecran-pointage" class="cache">
+    <div class="carte">
+      <h2 id="pointage-nom"></h2>
+      <p>Tape ton mot de passe (le même que dans ton application IMJ Mobile).</p>
+      <input type="password" id="pointage-mdp" placeholder="Ton mot de passe" autocomplete="new-password">
+      <button id="pointage-bouton" onclick="pointer()">Pointer mon arrivée</button>
+      <div class="erreur" id="pointage-message"></div>
+      <button class="secondaire" onclick="retourListe()">Retour</button>
+    </div>
+  </section>
+
+  <!-- 4. Confirmation -->
+  <section id="ecran-confirmation" class="cache">
+    <div class="carte" id="confirmation">
+      <div class="coche">✓</div>
+      <div class="nom" id="confirmation-nom"></div>
+      <div class="heure" id="confirmation-heure"></div>
+      <div class="detail" id="confirmation-detail"></div>
+      <button onclick="retourListe()">OK</button>
+    </div>
+  </section>
+</main>
+
+<script>
+// IMJ Pointage -- le telephone pose a l'entree du bureau.
+//
+// L'agent choisit son nom et tape son mot de passe (celui de son appli). Le pointage est garde dans
+// le telephone puis envoye au serveur, qui note lui-meme l'heure de reception : l'ordinateur du
+// bureau en deduit l'heure reelle (heure de reception - temps passe dans le telephone). L'heure que
+// ce telephone affiche ne sert donc qu'a informer l'agent.
+//
+// Sans Internet : le pointage attend ici et part tout seul au retour de la connexion. L'heure reste
+// sure tant que le telephone est reste allume sur cette page ; s'il a ete rallume, ou si son horloge
+// a bouge, le pointage part marque "heure a verifier".
+const VERSION_POINTAGE = "2026.10.10-1";
+const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
+const EMAIL_TELEPHONE = "pointage@imj-mobile.local";
+const FUSEAU_DU_BUREAU = "Africa/Lome";
+
+const SEUIL_SAUT_HORLOGE_MS = 60 * 1000;        // au-dela, l'horloge a ete changee (ou le telephone a dormi)
+const DELAI_HORS_CONNEXION_MS = 2 * 60 * 1000;  // un pointage parti plus tard que ca n'est pas parti "en direct"
+const LISTE_AGENTS_VALABLE_MS = 12 * 60 * 60 * 1000;
+const JOURS_GARDES = 40;
+const ESSAIS_SANS_INTERNET = 5;
+const ITERATIONS_EMPREINTE = 150000;
+
+// ---- Petite memoire du telephone ---------------------------------------------
+function lire(cle, defaut) {
+  try {
+    const valeur = localStorage.getItem("imjp_" + cle);
+    return valeur === null ? defaut : JSON.parse(valeur);
+  } catch (erreur) {
+    return defaut;
+  }
+}
+
+function ecrire(cle, valeur) {
+  localStorage.setItem("imjp_" + cle, JSON.stringify(valeur));
+}
+
+let db;
+function ouvrirBase() {
+  return new Promise((resolve, reject) => {
+    const requete = indexedDB.open("imj_pointage", 1);
+    requete.onupgradeneeded = (e) => {
+      const base = e.target.result;
+      if (!base.objectStoreNames.contains("pointages")) base.createObjectStore("pointages", { keyPath: "id_local" });
+    };
+    requete.onsuccess = (e) => { db = e.target.result; resolve(); };
+    requete.onerror = () => reject(requete.error);
+  });
+}
+
+function stockerPointage(pointage) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("pointages", "readwrite");
+    tx.objectStore("pointages").put(pointage);
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+function supprimerPointage(idLocal) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("pointages", "readwrite");
+    tx.objectStore("pointages").delete(idLocal);
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+function listerPointages() {
+  return new Promise((resolve) => {
+    const requete = db.transaction("pointages", "readonly").objectStore("pointages").getAll();
+    requete.onsuccess = () => resolve(requete.result || []);
+    requete.onerror = () => resolve([]);
+  });
+}
+
+function echapper(valeur) {
+  return String(valeur ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+async function fetchAvecDelai(url, options = {}, delaiMs = 20000) {
+  const controleur = new AbortController();
+  const minuteur = setTimeout(() => controleur.abort(), delaiMs);
+  try {
+    return await fetch(url, { ...options, signal: controleur.signal });
+  } finally {
+    clearTimeout(minuteur);
+  }
+}
+
+// ---- L'heure -------------------------------------------------------------------
+let decalageMs = Number(lire("decalage_ms", 0)) || 0;   // heure du serveur - heure du telephone, a la derniere mesure
+let horlogeSure = false;                                 // vrai tant que rien n'a bouge depuis la derniere mesure
+let raisonDoute = "telephone rallume sans Internet";
+let dernierMur = Date.now();
+let dernierMono = performance.now();
+
+function heureDuBureau() {
+  return new Date(Date.now() + decalageMs);
+}
+
+const FORMAT_HEURE = new Intl.DateTimeFormat("fr-FR", { timeZone: FUSEAU_DU_BUREAU, hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
+const FORMAT_JOUR = new Intl.DateTimeFormat("en-CA", { timeZone: FUSEAU_DU_BUREAU, year: "numeric", month: "2-digit", day: "2-digit" });
+const FORMAT_DATE = new Intl.DateTimeFormat("fr-FR", { timeZone: FUSEAU_DU_BUREAU, weekday: "long", day: "numeric", month: "long", year: "numeric" });
+
+function morceauxHeure(date) {
+  const morceaux = {};
+  for (const morceau of FORMAT_HEURE.formatToParts(date)) morceaux[morceau.type] = morceau.value;
+  return morceaux;
+}
+
+function heureLisible(date) {
+  const m = morceauxHeure(date);
+  return `${m.hour} h ${m.minute}`;
+}
+
+function jourDuBureau(date) {
+  return FORMAT_JOUR.format(date);   // AAAA-MM-JJ
+}
+
+// Ecart (heure du serveur - heure du telephone) lu dans un jeton qui vient d'etre recu, ou null.
+function ecartHorlogeDuJeton(jeton) {
+  try {
+    const partie = jeton.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const iat = JSON.parse(atob(partie)).iat;
+    return typeof iat === "number" ? iat * 1000 - Date.now() : null;
+  } catch (erreur) {
+    return null;
+  }
+}
+
+// A appeler des qu'un jeton vient d'etre recu du serveur : c'est la seule heure a laquelle on se fie.
+function mesurerHorloge(jeton) {
+  const ecart = ecartHorlogeDuJeton(jeton);
+  if (ecart === null) return;
+  decalageMs = ecart;
+  ecrire("decalage_ms", ecart);
+  horlogeSure = true;
+  raisonDoute = "";
+  dernierMur = Date.now();
+  dernierMono = performance.now();
+}
+
+// L'horloge a bouge : les pointages qui attendent leur envoi ne peuvent plus prouver leur heure.
+async function horlogeChangee(raison) {
+  horlogeSure = false;
+  raisonDoute = raison;
+  for (const pointage of await listerPointages()) {
+    if (!pointage.envoye && !pointage.horloge_douteuse) {
+      pointage.horloge_douteuse = true;
+      pointage.raison_doute = raison;
+      await stockerPointage(pointage);
+    }
+  }
+  afficherEtat();
+  synchroniser();   // avec Internet, l'heure est reverifiee tout de suite
+}
+
+// L'horloge murale et le chronometre interne doivent avancer ensemble : sinon quelqu'un a touche a l'heure.
+function surveillerHorloge() {
+  const mur = Date.now();
+  const mono = performance.now();
+  const derive = (mur - dernierMur) - (mono - dernierMono);
+  dernierMur = mur;
+  dernierMono = mono;
+  if (derive < -SEUIL_SAUT_HORLOGE_MS) horlogeChangee("l'horloge du telephone a recule");
+  else if (derive > SEUIL_SAUT_HORLOGE_MS) horlogeChangee("l'horloge du telephone a avance ou le telephone s'est mis en veille");
+}
+
+// ---- Le compte du telephone ----------------------------------------------------
+let enLigne = navigator.onLine;
+let sessionARefaire = false;
+let derniereErreurEnvoi = "";
+
+async function reglerTelephone() {
+  const champ = document.getElementById("reglage-mdp");
+  const message = document.getElementById("reglage-message");
+  const motDePasse = champ.value;
+  champ.value = "";
+  message.textContent = "";
+  if (!motDePasse) {
+    message.textContent = "Tape le mot de passe du téléphone de pointage.";
+    return;
+  }
+  try {
+    const reponse = await fetchAvecDelai(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+      method: "POST",
+      headers: { apikey: SUPABASE_ANON_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ email: EMAIL_TELEPHONE, password: motDePasse }),
+    }, 15000);
+    if (!reponse.ok) {
+      message.textContent = "Mot de passe du téléphone incorrect (ou le téléphone de pointage n'est pas encore créé dans IMJ Core).";
+      return;
+    }
+    const donnees = await reponse.json();
+    ecrire("session", { access_token: donnees.access_token, refresh_token: donnees.refresh_token, expires_at: Date.now() + donnees.expires_in * 1000 });
+    mesurerHorloge(donnees.access_token);
+    sessionARefaire = false;
+    enLigne = true;
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+    afficherEcran("liste");
+    synchroniser();
+  } catch (erreur) {
+    message.textContent = "Pas de connexion Internet. Elle est nécessaire pour régler le téléphone la première fois.";
+  }
+}
+
+async function renouvelerSession() {
+  const session = lire("session", null);
+  if (!session) return false;
+  try {
+    const reponse = await fetchAvecDelai(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: "POST",
+      headers: { apikey: SUPABASE_ANON_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: session.refresh_token }),
+    }, 8000);
+    enLigne = true;
+    if (reponse.ok) {
+      const donnees = await reponse.json();
+      ecrire("session", { access_token: donnees.access_token, refresh_token: donnees.refresh_token, expires_at: Date.now() + donnees.expires_in * 1000 });
+      mesurerHorloge(donnees.access_token);
+      sessionARefaire = false;
+      return true;
+    }
+    // Le serveur ne reconnait plus ce telephone : la directrice doit retaper son mot de passe.
+    if ([400, 401, 403].includes(reponse.status)) sessionARefaire = true;
+    return false;
+  } catch (erreur) {
+    enLigne = false;
+    return false;
+  }
+}
+
+function enTetes() {
+  const session = lire("session", null);
+  return { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${session ? session.access_token : SUPABASE_ANON_KEY}`, "Content-Type": "application/json" };
+}
+
+// ---- La liste des agents -------------------------------------------------------
+async function telechargerAgents() {
+  const session = lire("session", null);
+  if (!session || sessionARefaire) return;
+  if (Date.now() > session.expires_at - 60000 && !(await renouvelerSession())) return;
+  try {
+    const reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/agents_pointage_mobile?select=code_agent,nom&order=nom.asc`, { headers: enTetes() }, 8000);
+    enLigne = true;
+    if (!reponse.ok) return;
+    const agents = await reponse.json();
+    if (Array.isArray(agents)) {
+      ecrire("agents", agents);
+      ecrire("agents_le", Date.now());
+    }
+  } catch (erreur) {
+    enLigne = false;
+  }
+}
+
+async function afficherListe() {
+  const agents = lire("agents", []);
+  const aujourdHui = jourDuBureau(heureDuBureau());
+  const pointages = (await listerPointages()).filter(p => p.jour === aujourdHui);
+  let html = "";
+  for (const agent of agents) {
+    const pointage = pointages.find(p => p.code_agent === agent.code_agent);
+    const arrivee = pointage
+      ? `<span class="arrivee">Arrivée ${echapper(pointage.heure_affichee)}${pointage.envoye ? "" : "<small>en attente d'envoi</small>"}</span>`
+      : "";
+    html += `<button class="bouton-agent${pointage ? " pointe" : ""}" onclick="choisirAgent('${echapper(agent.code_agent)}')">
+      <span>${echapper(agent.nom)}<span class="code">${echapper(agent.code_agent)}</span></span>${arrivee}</button>`;
+  }
+  if (!agents.length) {
+    html = `<p>La liste des agents n'est pas encore arrivée. Sur l'ordinateur du bureau, lance la synchronisation (ou attends le prochain passage, toutes les heures), puis touche « Actualiser ».</p>`;
+  }
+  document.getElementById("liste-agents").innerHTML = html;
+}
+
+// ---- L'empreinte du mot de passe, pour pointer sans Internet -------------------
+// Le mot de passe lui-meme n'est JAMAIS garde : seulement une empreinte lente a calculer, avec un sel par agent.
+function enHexa(octets) {
+  return Array.from(new Uint8Array(octets)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+function depuisHexa(texte) {
+  return new Uint8Array(texte.match(/.{2}/g).map(h => parseInt(h, 16)));
+}
+
+async function calculerEmpreinte(motDePasse, sel) {
+  const cle = await crypto.subtle.importKey("raw", new TextEncoder().encode(motDePasse), "PBKDF2", false, ["deriveBits"]);
+  return enHexa(await crypto.subtle.deriveBits({ name: "PBKDF2", salt: sel, iterations: ITERATIONS_EMPREINTE, hash: "SHA-256" }, cle, 256));
+}
+
+async function memoriserEmpreinte(code, motDePasse) {
+  const sel = crypto.getRandomValues(new Uint8Array(16));
+  const empreintes = lire("empreintes", {});
+  empreintes[code] = { sel: enHexa(sel), empreinte: await calculerEmpreinte(motDePasse, sel) };
+  ecrire("empreintes", empreintes);
+}
+
+// true / false, ou null si cet agent n'a encore jamais pointe ici avec Internet.
+async function verifierEmpreinte(code, motDePasse) {
+  const gardee = lire("empreintes", {})[code];
+  if (!gardee) return null;
+  return (await calculerEmpreinte(motDePasse, depuisHexa(gardee.sel))) === gardee.empreinte;
+}
+
+function oublierEmpreinte(code) {
+  const empreintes = lire("empreintes", {});
+  delete empreintes[code];
+  ecrire("empreintes", empreintes);
+}
+
+const essaisRates = {};   // code -> { nombre, jusqua }
+
+// Verifie le mot de passe de l'agent : aupres du serveur s'il repond, sinon avec l'empreinte gardee.
+async function verifierAgent(code, motDePasse) {
+  if (navigator.onLine) {
+    try {
+      const reponse = await fetchAvecDelai(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+        method: "POST",
+        headers: { apikey: SUPABASE_ANON_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify({ email: `${code.toLowerCase()}@imj-mobile.local`, password: motDePasse }),
+      }, 8000);
+      if (reponse.ok) {
+        const donnees = await reponse.json();
+        enLigne = true;
+        mesurerHorloge(donnees.access_token);
+        await memoriserEmpreinte(code, motDePasse);
+        // Ce jeton n'a servi qu'a verifier le mot de passe : on le rend tout de suite.
+        fetchAvecDelai(`${SUPABASE_URL}/auth/v1/logout?scope=local`, {
+          method: "POST", headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${donnees.access_token}` },
+        }, 8000).catch(() => {});
+        return { ok: true, enLigne: true };
+      }
+      if ([400, 401, 403, 422].includes(reponse.status)) {
+        enLigne = true;
+        // Le serveur refuse : si l'empreinte gardee disait oui, c'est que le mot de passe a change depuis.
+        if (await verifierEmpreinte(code, motDePasse)) oublierEmpreinte(code);
+        return { ok: false, message: "Mot de passe incorrect." };
+      }
+    } catch (erreur) {
+      enLigne = false;
+    }
+  } else {
+    enLigne = false;
+  }
+
+  const blocage = essaisRates[code];
+  if (blocage && blocage.jusqua > Date.now()) {
+    return { ok: false, message: "Trop d'essais. Attends une minute, ou va voir la caissière." };
+  }
+  const locale = await verifierEmpreinte(code, motDePasse);
+  if (locale === null) {
+    return { ok: false, message: "Pas d'Internet, et tu n'as encore jamais pointé sur ce téléphone avec Internet. Va voir la caissière : elle note ton arrivée." };
+  }
+  if (!locale) {
+    const nombre = ((blocage && blocage.nombre) || 0) + 1;
+    essaisRates[code] = { nombre: nombre >= ESSAIS_SANS_INTERNET ? 0 : nombre, jusqua: nombre >= ESSAIS_SANS_INTERNET ? Date.now() + 60000 : 0 };
+    return { ok: false, message: "Mot de passe incorrect." };
+  }
+  delete essaisRates[code];
+  return { ok: true, enLigne: false };
+}
+
+// ---- Le pointage ---------------------------------------------------------------
+let agentChoisi = null;
+let pointageEnCours = false;
+let minuteurRetour = null;
+
+function afficherEcran(nom) {
+  for (const ecran of ["reglage", "liste", "pointage", "confirmation"]) {
+    document.getElementById(`ecran-${ecran}`).className = ecran === nom ? "" : "cache";
+  }
+  clearTimeout(minuteurRetour);
+  document.getElementById("reglage-retour").className = lire("session", null) ? "secondaire" : "secondaire cache";
+  if (nom === "liste") afficherListe();
+  if (nom === "pointage") minuteurRetour = setTimeout(retourListe, 60000);     // personne ne reste sur l'ecran d'un autre
+  if (nom === "confirmation") minuteurRetour = setTimeout(retourListe, 7000);
+  afficherEtat();
+}
+
+function retourListe() {
+  agentChoisi = null;
+  document.getElementById("pointage-mdp").value = "";
+  document.getElementById("pointage-message").textContent = "";
+  afficherEcran(lire("session", null) ? "liste" : "reglage");
+}
+
+async function pointageDuJour(code) {
+  const aujourdHui = jourDuBureau(heureDuBureau());
+  return (await listerPointages()).find(p => p.jour === aujourdHui && p.code_agent === code) || null;
+}
+
+async function choisirAgent(code) {
+  const agent = lire("agents", []).find(a => a.code_agent === code);
+  if (!agent) return;
+  const message = document.getElementById("liste-message");
+  message.textContent = "";
+  const deja = await pointageDuJour(code);
+  if (deja) {
+    message.textContent = `${agent.nom} : arrivée déjà pointée aujourd'hui à ${deja.heure_affichee}. Un seul pointage par jour.`;
+    return;
+  }
+  agentChoisi = agent;
+  document.getElementById("pointage-nom").textContent = `${agent.nom} (${agent.code_agent})`;
+  afficherEcran("pointage");
+  document.getElementById("pointage-mdp").focus();
+}
+
+async function pointer() {
+  if (pointageEnCours || !agentChoisi) return;   // un double appui ne pointe pas deux fois
+  pointageEnCours = true;
+  const bouton = document.getElementById("pointage-bouton");
+  const message = document.getElementById("pointage-message");
+  const champ = document.getElementById("pointage-mdp");
+  const agent = agentChoisi;
+  const motDePasse = champ.value;
+  champ.value = "";
+  message.textContent = "";
+  bouton.textContent = "Vérification...";
+  try {
+    if (!motDePasse) {
+      message.textContent = "Tape ton mot de passe.";
+      return;
+    }
+    const verification = await verifierAgent(agent.code_agent, motDePasse);
+    if (!verification.ok) {
+      message.textContent = verification.message;
+      return;
+    }
+    if (await pointageDuJour(agent.code_agent)) {
+      retourListe();
+      return;
+    }
+    surveillerHorloge();
+    const mur = Date.now();                        // l'heure brute du telephone : c'est elle que le bureau recalcule
+    const heure = new Date(mur + decalageMs);
+    const pointage = {
+      id_local: crypto.randomUUID(),
+      code_agent: agent.code_agent,
+      nom: agent.nom,
+      mur: mur,
+      jour: jourDuBureau(heure),
+      heure_affichee: heureLisible(heure),
+      hors_connexion: !verification.enLigne,
+      horloge_douteuse: !horlogeSure,
+      raison_doute: horlogeSure ? "" : raisonDoute,
+      envoye: false,
+    };
+    await stockerPointage(pointage);
+
+    document.getElementById("confirmation-nom").textContent = `Bonjour ${agent.nom}`;
+    document.getElementById("confirmation-heure").textContent = pointage.heure_affichee;
+    document.getElementById("confirmation-detail").textContent = "Arrivée enregistrée."
+      + (verification.enLigne ? "" : " Pas d'Internet : elle sera envoyée au bureau dès que la connexion revient.")
+      + (pointage.horloge_douteuse ? " L'heure sera vérifiée par le bureau." : "");
+    agentChoisi = null;
+    afficherEcran("confirmation");
+    synchroniser();
+  } finally {
+    pointageEnCours = false;
+    bouton.textContent = "Pointer mon arrivée";
+  }
+}
+
+// ---- L'envoi au bureau ---------------------------------------------------------
+async function envoyerEnAttente() {
+  const enAttente = (await listerPointages()).filter(p => !p.envoye).sort((a, b) => a.mur - b.mur);
+  if (!enAttente.length) return;
+  const session = lire("session", null);
+  if (!session || sessionARefaire) return;
+  if (Date.now() > session.expires_at - 60000 && !(await renouvelerSession())) return;
+
+  for (const pointage of enAttente) {
+    const maintenant = Date.now();
+    const corps = {
+      id_local: pointage.id_local,
+      code_agent: pointage.code_agent,
+      heure_appareil: new Date(pointage.mur).toISOString(),
+      envoye_appareil: new Date(maintenant).toISOString(),
+      hors_connexion: pointage.hors_connexion || maintenant - pointage.mur > DELAI_HORS_CONNEXION_MS,
+      horloge_douteuse: !!pointage.horloge_douteuse,
+      detail: pointage.raison_doute || null,
+    };
+    try {
+      const reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/pointages_mobile?on_conflict=id_local`, {
+        method: "POST",
+        headers: { ...enTetes(), Prefer: "resolution=ignore-duplicates,return=minimal" },
+        body: JSON.stringify(corps),
+      }, 20000);
+      enLigne = true;
+      if (reponse.ok) {
+        pointage.envoye = true;
+        pointage.envoye_le = maintenant;
+        await stockerPointage(pointage);
+        derniereErreurEnvoi = "";
+      } else if (reponse.status === 401) {
+        await renouvelerSession();   // jeton perime : le prochain passage reessaiera
+        return;
+      } else {
+        derniereErreurEnvoi = `le serveur a répondu ${reponse.status}`;
+        return;
+      }
+    } catch (erreur) {
+      enLigne = false;
+      return;
+    }
+  }
+}
+
+let synchroEnCours = false;
+let synchroDemandee = false;
+let listeDemandee = true;   // a l'ouverture de la page, puis quand on touche "Actualiser"
+
+// Un seul passage a la fois ; un pointage fait pendant un passage en declenche un autre juste apres.
+// Le compte du telephone n'est renouvele que quand il le faut (heure a confirmer, envoi, liste) :
+// moins d'echanges avec le serveur, moins de risques sur une connexion qui accroche.
+async function synchroniser(avecListe = false) {
+  if (avecListe) listeDemandee = true;
+  if (synchroEnCours) {
+    synchroDemandee = true;
+    return;
+  }
+  synchroEnCours = true;
+  try {
+    do {
+      synchroDemandee = false;
+      if (lire("session", null)) {
+        if (!horlogeSure && !sessionARefaire) await renouvelerSession();   // le jeton recu donne l'heure du serveur
+        await envoyerEnAttente();
+        if (listeDemandee || !lire("agents", []).length || Date.now() - lire("agents_le", 0) > LISTE_AGENTS_VALABLE_MS) {
+          listeDemandee = false;
+          await telechargerAgents();
+        }
+      }
+    } while (synchroDemandee);
+  } finally {
+    synchroEnCours = false;
+  }
+  afficherEtat();
+  if (!document.getElementById("ecran-liste").classList.contains("cache")) afficherListe();
+}
+
+// ---- Ce que le telephone affiche de son etat -----------------------------------
+let batterie = null;
+
+function afficherBandeau(id, classe, texte) {
+  const bandeau = document.getElementById(id);
+  bandeau.className = texte ? `bandeau ${classe}` : "bandeau cache";
+  bandeau.textContent = texte || "";
+}
+
+async function afficherEtat() {
+  const regle = !!lire("session", null);
+  const enAttente = db ? (await listerPointages()).filter(p => !p.envoye).length : 0;
+  const attente = enAttente ? ` ${enAttente} pointage(s) gardé(s) dans le téléphone, en attente d'envoi.` : "";
+
+  afficherBandeau("bandeau-reglage", "rouge", regle && sessionARefaire
+    ? "Ce téléphone doit être réglé de nouveau par la directrice. Les pointages continuent d'être gardés ici." : "");
+  afficherBandeau("bandeau-horloge", "rouge", regle && !horlogeSure && !enLigne
+    ? `Heure non confirmée (${raisonDoute}). Les pointages partiront marqués « heure à vérifier » tant qu'Internet n'est pas revenu.` : "");
+  afficherBandeau("bandeau-batterie", "rouge", batterie && !batterie.charging && batterie.level <= 0.2
+    ? `Batterie faible (${Math.round(batterie.level * 100)} %) : branche le téléphone. S'il s'éteint, la caissière note les arrivées.` : "");
+  if (!regle) {
+    afficherBandeau("bandeau-reseau", "jaune", "");
+  } else if (!enLigne) {
+    afficherBandeau("bandeau-reseau", "jaune", `Pas d'Internet : tu peux pointer quand même.${attente}`);
+  } else if (enAttente) {
+    afficherBandeau("bandeau-reseau", "jaune", `Envoi en cours.${attente}${derniereErreurEnvoi ? ` (${derniereErreurEnvoi})` : ""}`);
+  } else {
+    afficherBandeau("bandeau-reseau", "vert", "Connecté au bureau : les pointages partent tout de suite.");
+  }
+
+  document.getElementById("pied").innerHTML = regle
+    ? `<a href="#" onclick="synchroniser(true); return false;">Actualiser</a>${sessionARefaire ? ` · <a href="#" onclick="afficherEcran('reglage'); return false;">Régler de nouveau</a>` : ""}`
+    : "";
+}
+
+function afficherHorloge() {
+  const maintenant = heureDuBureau();
+  const m = morceauxHeure(maintenant);
+  document.getElementById("horloge").textContent = `${m.hour}:${m.minute}:${m.second}`;
+  document.getElementById("date-du-jour").textContent = FORMAT_DATE.format(maintenant);
+}
+
+// L'ecran reste allume tant que la page est affichee (le telephone reste branche).
+let verrouEcran = null;
+async function garderEcranAllume() {
+  try {
+    if ("wakeLock" in navigator && document.visibilityState === "visible" && (!verrouEcran || verrouEcran.released)) {
+      verrouEcran = await navigator.wakeLock.request("screen");
+    }
+  } catch (erreur) {
+    // refuse (batterie tres faible...) : la page marche quand meme
+  }
+}
+
+async function demarrer() {
+  document.getElementById("version").textContent = `v${VERSION_POINTAGE}`;
+  await ouvrirBase();
+
+  // La page vient de s'ouvrir : pour les pointages qui attendaient, personne n'a surveille l'horloge entre-temps.
+  const limite = Date.now() - JOURS_GARDES * 24 * 3600 * 1000;
+  for (const pointage of await listerPointages()) {
+    if (pointage.envoye && pointage.mur < limite) {
+      await supprimerPointage(pointage.id_local);
+    } else if (!pointage.envoye && !pointage.horloge_douteuse) {
+      pointage.horloge_douteuse = true;
+      pointage.raison_doute = "telephone rallume avant l'envoi";
+      await stockerPointage(pointage);
+    }
+  }
+
+  afficherEcran(lire("session", null) ? "liste" : "reglage");
+  afficherHorloge();
+  setInterval(afficherHorloge, 1000);
+  setInterval(surveillerHorloge, 10000);
+  setInterval(() => synchroniser(), 60000);
+  let jourAffiche = jourDuBureau(heureDuBureau());
+  setInterval(() => {   // a minuit, la liste repart a zero
+    const jour = jourDuBureau(heureDuBureau());
+    if (jour !== jourAffiche) {
+      jourAffiche = jour;
+      if (!document.getElementById("ecran-liste").classList.contains("cache")) afficherListe();
+    }
+  }, 30000);
+
+  window.addEventListener("online", () => { enLigne = true; synchroniser(); });
+  window.addEventListener("offline", () => { enLigne = false; afficherEtat(); });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      surveillerHorloge();
+      garderEcranAllume();
+      synchroniser();
+    }
+  });
+  garderEcranAllume();
+  if (navigator.getBattery) {
+    navigator.getBattery().then((etat) => {
+      batterie = etat;
+      etat.addEventListener("levelchange", afficherEtat);
+      etat.addEventListener("chargingchange", afficherEtat);
+      afficherEtat();
+    }).catch(() => {});
+  }
+  synchroniser();
+}
+
+document.getElementById("pointage-mdp").addEventListener("keydown", (e) => { if (e.key === "Enter") pointer(); });
+document.getElementById("reglage-mdp").addEventListener("keydown", (e) => { if (e.key === "Enter") reglerTelephone(); });
+demarrer().catch((erreur) => {
+  afficherBandeau("bandeau-reglage", "rouge", `Ce téléphone ne peut pas garder les pointages (${erreur && erreur.name ? erreur.name : "mémoire refusée"}). Ouvre la page dans Chrome, hors navigation privée.`);
+});
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+</script>
+</body>
+</html>
