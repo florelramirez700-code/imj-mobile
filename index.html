@@ -104,6 +104,13 @@
     border-radius: 9px; background: #DC2945; color: white; font-size: 11px;
   }
   .compteur.cache { display: none; }
+  #bandeau-envoi {
+    position: sticky; top: 0; z-index: 20;
+    background: #FFF3CD; border-bottom: 1px solid #FFC107; color: #664D03;
+    padding: 10px 14px; font-size: 13px;
+  }
+  #bandeau-envoi .actions { display: flex; gap: 8px; margin-top: 6px; }
+  #bandeau-envoi button { margin: 0; padding: 8px; font-size: 13px; }
   .bouton-plus {
     background: white; color: #212529; border: 1px solid #E4E9F0;
     text-align: left; font-weight: 500; margin-top: 8px;
@@ -140,6 +147,14 @@
     </div>
     <button class="secondaire" style="width:auto; padding:6px 12px; font-size:12px;" onclick="seDeconnecter()">Sortir</button>
   </header>
+
+  <div id="bandeau-envoi" class="cache">
+    <div id="bandeau-envoi-texte"></div>
+    <div class="actions">
+      <button onclick="synchroniserDepuisBandeau()">Envoyer maintenant</button>
+      <button class="secondaire" onclick="allerA('attente')">Verifier avant</button>
+    </div>
+  </div>
 
   <main>
     <div id="page-nouveau-client" class="cache">
@@ -431,7 +446,7 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.10.10-4";
+const VERSION_APP = "2026.10.10-5";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
@@ -774,6 +789,8 @@ async function seDeconnecter() {
   document.getElementById("ecran-app").className = "cache";
   document.getElementById("ecran-connexion").className = "visible";
   document.getElementById("login-mdp").value = "";
+  codeAgentConnecte = null;
+  mettreAJourBandeauEnvoi(0);
 }
 
 function afficherApp(session) {
@@ -791,6 +808,8 @@ const TOUTES_LES_PAGES = ["nouveau-client", "mise", "credit", "mes-demandes", "m
 const ONGLET_DE_LA_PAGE = { "mise": "mise", "nouveau-client": "client", "attente": "attente" };
 
 function allerA(page) {
+  pageCourante = page;
+  actualiserBandeauEnvoi();
   TOUTES_LES_PAGES.forEach(p => {
     document.getElementById(`page-${p}`).className = p === page ? "visible" : "cache";
   });
@@ -1675,6 +1694,43 @@ async function signalerErreurMise(idLocalMise, numeroCarnet, montantUnitaire, no
   await chargerHistoriqueMises();
 }
 
+// ---- Bandeau « a envoyer » : il apparait tout seul des qu'il y a Internet et des elements en attente.
+// Rien ne part sans que l'agent appuie : il peut d'abord verifier (et supprimer une erreur) dans « Attente ».
+const MAGASINS_A_ENVOYER = ["clients", "mises", "demandes_credit", "confirmations_remise", "fermetures_volontaires", "reprises_historiques", "rattrapages", "operations_carnet", "confirmations_penalite", "mises_supprimees", "signalements"];
+let pageCourante = "mise";
+
+async function totalEnAttente() {
+  let total = 0;
+  for (const magasin of MAGASINS_A_ENVOYER) total += (await listerObjets(magasin)).filter(x => !x.synchronise).length;
+  return total;
+}
+
+function mettreAJourBandeauEnvoi(total) {
+  const bandeau = document.getElementById("bandeau-envoi");
+  if (!bandeau) return;
+  const afficher = total > 0 && !!codeAgentConnecte && navigator.onLine && pageCourante !== "attente" && !actionsEnCours.has("synchro");
+  bandeau.className = afficher ? "visible" : "cache";
+  if (afficher) {
+    document.getElementById("bandeau-envoi-texte").textContent =
+      `${total} element(s) a envoyer au bureau. Verifie-les d'abord (tu peux supprimer une erreur dans « Attente »), puis envoie.`;
+  }
+}
+
+async function actualiserBandeauEnvoi() {
+  mettreAJourBandeauEnvoi(await totalEnAttente());
+}
+
+async function synchroniserDepuisBandeau() {
+  await synchroniser();
+  const messageEl = document.getElementById("sync-message");
+  alert(messageEl.innerText.split("\n")[0] || "Envoi termine.");
+  await actualiserBandeauEnvoi();
+}
+
+window.addEventListener("online", actualiserBandeauEnvoi);
+window.addEventListener("offline", actualiserBandeauEnvoi);
+setInterval(actualiserBandeauEnvoi, 60000);
+
 async function rafraichirListeAttente() {
   const clients = (await listerObjets("clients")).filter(c => !c.synchronise);
   const mises = (await listerObjets("mises")).filter(m => !m.synchronise);
@@ -1696,6 +1752,7 @@ async function rafraichirListeAttente() {
   const compteurEl = document.getElementById("nav-compteur-attente");
   compteurEl.textContent = total;
   compteurEl.className = total > 0 ? "compteur" : "compteur cache";
+  mettreAJourBandeauEnvoi(total);
 
   clients.forEach(c => {
     conteneur.innerHTML += `<div class="ligne-attente"><span>Client : ${echapper(c.nom)}</span><span class="badge">en attente</span></div>`;
@@ -1736,6 +1793,11 @@ async function rafraichirListeAttente() {
 }
 
 async function synchroniser() {
+  return unSeulALaFois("synchro", synchroniserInterne);
+}
+
+async function synchroniserInterne() {
+  mettreAJourBandeauEnvoi(0);
   const messageEl = document.getElementById("sync-message");
   messageEl.className = "";
   messageEl.textContent = "Synchronisation en cours...";
