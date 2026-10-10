@@ -431,12 +431,12 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.10.10-1";
+const VERSION_APP = "2026.10.10-2";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
 let db;
-const requeteDB = indexedDB.open("imj_mobile", 13);
+const requeteDB = indexedDB.open("imj_mobile", 14);
 requeteDB.onupgradeneeded = (e) => {
   db = e.target.result;
   if (!db.objectStoreNames.contains("session")) db.createObjectStore("session", { keyPath: "cle" });
@@ -452,6 +452,8 @@ requeteDB.onupgradeneeded = (e) => {
   if (!db.objectStoreNames.contains("confirmations_penalite")) db.createObjectStore("confirmations_penalite", { keyPath: "id_local" });
   if (!db.objectStoreNames.contains("operations_carnet")) db.createObjectStore("operations_carnet", { keyPath: "id_local" });
   if (!db.objectStoreNames.contains("copies_ecrans")) db.createObjectStore("copies_ecrans", { keyPath: "cle" });
+  if (!db.objectStoreNames.contains("mises_supprimees")) db.createObjectStore("mises_supprimees", { keyPath: "id_local" });
+  if (!db.objectStoreNames.contains("signalements")) db.createObjectStore("signalements", { keyPath: "id_local" });
 };
 requeteDB.onsuccess = (e) => {
   db = e.target.result;
@@ -1518,22 +1520,77 @@ async function chargerHistoriqueMises() {
     }
 
     messageEl.textContent = mentionCopie(dateCopie).trim();
+    const dejaSignalees = new Set((await listerObjets("signalements")).map(x => x.id_local_mise));
+    let htmlMises = "";
     mises.forEach(m => {
       const cible = m.numero_carnet ? `Carnet ${echapper(m.numero_carnet)}` : "Nouveau client";
       const estNouvellePage = m.resultat_message && m.resultat_message.includes("Nouvelle page ouverte");
-      conteneur.innerHTML += `
+      htmlMises += `
         <div class="ligne-attente" style="flex-direction:column; align-items:flex-start;">
           <div style="display:flex; justify-content:space-between; width:100%;">
             <span><b>${cible}</b></span>
             <span class="badge ok">traite</span>
           </div>
           ${m.resultat_message ? `<span style="font-size:13px; color:${estNouvellePage ? "#E99A0C" : "#212529"}; margin-top:4px; font-weight:${estNouvellePage ? "600" : "400"};">${echapper(m.resultat_message)}</span>` : ""}
+          ${dejaSignalees.has(m.id_local)
+            ? `<span style="font-size:13px; color:#198754; margin-top:6px;">Erreur signalee au bureau.</span>`
+            : `<button style="margin-top:8px; width:auto; padding:6px 14px; background:#6c757d;" onclick="signalerErreurMise('${echapper(m.id_local)}', ${Number(m.numero_carnet) || 0}, ${Number(m.montant_unitaire) || 0}, ${Number(m.nombre_mise) || 1}, '${echapper(m.date_saisie)}')">Signaler une erreur</button>`}
         </div>`;
     });
+    conteneur.innerHTML = htmlMises;
   } catch (erreur) {
     messageEl.className = "erreur";
     messageEl.textContent = "Impossible de charger, et aucune copie dans le telephone : ouvre cet ecran une fois avec internet.";
   }
+}
+
+// Supprimer une mise encore en attente (pas encore envoyee au bureau). Le bureau en garde la trace.
+async function supprimerMiseEnAttente(idLocal) {
+  const mise = await lireObjet("mises", idLocal);
+  if (!mise || mise.synchronise) {
+    alert("Cette mise est deja envoyee au bureau. Pour une erreur, utilise « Signaler une erreur » dans « Dernieres mises traitees ».");
+    await rafraichirListeAttente();
+    return;
+  }
+  const montant = mise.montant_unitaire * mise.nombre_mise;
+  const cible = mise.numero_carnet ? `carnet ${mise.numero_carnet}` : "nouveau client";
+  if (!confirm(`Supprimer cette mise (${cible}, ${montant} F) ?\n\nElle ne sera pas envoyee au bureau, mais le bureau verra que tu l'as supprimee.\n\nPour la corriger : supprime-la, puis saisis la bonne mise.`)) return;
+  await stockerObjet("mises_supprimees", {
+    id_local: mise.id_local,
+    agent_id: mise.agent_id,
+    numero_carnet: mise.numero_carnet,
+    id_local_client: mise.id_local_client,
+    montant_unitaire: mise.montant_unitaire,
+    nombre_mise: mise.nombre_mise,
+    date_saisie: mise.date_saisie,
+    saisie_le: mise.created_at,
+    supprimee_le: new Date().toISOString(),
+    synchronise: false
+  });
+  await supprimerObjet("mises", idLocal);
+  await rafraichirListeAttente();
+}
+
+// Signaler une erreur sur une mise deja envoyee : le bureau la corrige.
+async function signalerErreurMise(idLocalMise, numeroCarnet, montantUnitaire, nombreMise, dateSaisie) {
+  const description = prompt("Quelle est l'erreur ? (exemple : le montant etait 500 F par case, pas 1000 F)");
+  if (!description || !description.trim()) return;
+  const session = await lireObjet("session", "agent");
+  await stockerObjet("signalements", {
+    id_local: genererUUID(),
+    agent_id: session.code,
+    id_local_mise: idLocalMise,
+    numero_carnet: numeroCarnet || null,
+    montant_unitaire: montantUnitaire,
+    nombre_mise: nombreMise,
+    date_saisie: dateSaisie,
+    description: description.trim().slice(0, 300),
+    created_at: new Date().toISOString(),
+    synchronise: false
+  });
+  alert("Erreur enregistree. Elle sera envoyee au bureau a la prochaine synchronisation.");
+  await rafraichirListeAttente();
+  await chargerHistoriqueMises();
 }
 
 async function rafraichirListeAttente() {
@@ -1546,11 +1603,13 @@ async function rafraichirListeAttente() {
   const rattrapages = (await listerObjets("rattrapages")).filter(r => !r.synchronise);
   const operationsCarnet = (await listerObjets("operations_carnet")).filter(o => !o.synchronise);
   const confirmationsPenalite = (await listerObjets("confirmations_penalite")).filter(c => !c.synchronise);
+  const misesSupprimees = (await listerObjets("mises_supprimees")).filter(x => !x.synchronise);
+  const signalements = (await listerObjets("signalements")).filter(x => !x.synchronise);
   const conteneur = document.getElementById("liste-attente");
   const rienEl = document.getElementById("rien-attente");
 
   conteneur.innerHTML = "";
-  const total = clients.length + mises.length + demandesCredit.length + confirmationsRemise.length + fermeturesVolontaires.length + reprisesHistoriques.length + rattrapages.length + operationsCarnet.length + confirmationsPenalite.length;
+  const total = clients.length + mises.length + demandesCredit.length + confirmationsRemise.length + fermeturesVolontaires.length + reprisesHistoriques.length + rattrapages.length + operationsCarnet.length + confirmationsPenalite.length + misesSupprimees.length + signalements.length;
   rienEl.style.display = total === 0 ? "block" : "none";
   const compteurEl = document.getElementById("nav-compteur-attente");
   compteurEl.textContent = total;
@@ -1562,7 +1621,13 @@ async function rafraichirListeAttente() {
   mises.forEach(m => {
     const carnetConnu = m.numero_carnet ? decrireCarnet(m.numero_carnet).carnet : null;
     const cible = m.numero_carnet ? `carnet ${echapper(m.numero_carnet)}${carnetConnu ? ` (${echapper(carnetConnu.nom_client)})` : ""}` : "nouveau client (en attente de numero)";
-    conteneur.innerHTML += `<div class="ligne-attente"><span>Mise ${cible} : ${echapper(m.montant_unitaire * m.nombre_mise)} F</span><span class="badge">en attente</span></div>`;
+    conteneur.innerHTML += `<div class="ligne-attente" style="flex-wrap:wrap;"><span>Mise ${cible} : ${echapper(m.montant_unitaire * m.nombre_mise)} F</span><span class="badge">en attente</span><button style="margin-top:6px; width:auto; padding:6px 14px; background:#dc3545;" onclick="supprimerMiseEnAttente('${echapper(m.id_local)}')">Supprimer</button></div>`;
+  });
+  misesSupprimees.forEach(x => {
+    conteneur.innerHTML += `<div class="ligne-attente"><span>Mise supprimee ${x.numero_carnet ? `carnet ${echapper(x.numero_carnet)}` : "(nouveau client)"} : ${echapper(x.montant_unitaire * x.nombre_mise)} F</span><span class="badge">trace a envoyer</span></div>`;
+  });
+  signalements.forEach(x => {
+    conteneur.innerHTML += `<div class="ligne-attente"><span>Erreur signalee ${x.numero_carnet ? `carnet ${echapper(x.numero_carnet)}` : ""} : ${echapper(x.description)}</span><span class="badge">a envoyer</span></div>`;
   });
   demandesCredit.forEach(d => {
     conteneur.innerHTML += `<div class="ligne-attente"><span>Demande credit carnet ${echapper(d.numero_carnet)}</span><span class="badge">en attente</span></div>`;
@@ -1664,6 +1729,33 @@ async function synchroniser() {
     } catch (e) {
       detailsErreurs.push(`Mise (carnet ${mise.numero_carnet || "nouveau client"}) : erreur reseau -- ${e.message}`);
       echecs++;
+    }
+  }
+
+  for (const [magasin, table, libelle] of [["mises_supprimees", "mises_supprimees_mobile", "Mise supprimee"], ["signalements", "signalements_mobile", "Erreur signalee"]]) {
+    const traces = (await listerObjets(magasin)).filter(x => !x.synchronise);
+    for (const trace of traces) {
+      const corps = { ...trace };
+      delete corps.synchronise;
+      try {
+        const reponse = await fetch(`${SUPABASE_URL}/rest/v1/${table}?on_conflict=id_local`, {
+          method: "POST",
+          headers: { ...headers, Prefer: "resolution=ignore-duplicates" },
+          body: JSON.stringify(corps)
+        });
+        if (reponse.ok) {
+          trace.synchronise = true;
+          await stockerObjet(magasin, trace);
+          envoyes++;
+        } else {
+          const texteErreur = await reponse.text();
+          detailsErreurs.push(`${libelle} : HTTP ${reponse.status} -- ${texteErreur.slice(0, 200)}`);
+          echecs++;
+        }
+      } catch (e) {
+        detailsErreurs.push(`${libelle} : erreur reseau -- ${e.message}`);
+        echecs++;
+      }
     }
   }
 
