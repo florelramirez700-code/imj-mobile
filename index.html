@@ -448,7 +448,7 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.10.10-8";
+const VERSION_APP = "2026.10.11-1";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
@@ -940,6 +940,37 @@ function fichierVersBase64(fichier) {
   });
 }
 
+// Une photo d'appareil pese plusieurs Mo : sur le reseau du terrain, l'envoi echoue souvent.
+// On la reduit (grand cote 1000 px, JPEG) : environ 150 Ko, largement assez pour reconnaitre le client.
+const PHOTO_COTE_MAX = 1000;
+const PHOTO_QUALITE = 0.75;
+
+function reduirePhoto(base64DataUrl) {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => {
+      try {
+        const echelle = Math.min(1, PHOTO_COTE_MAX / Math.max(image.width, image.height));
+        const toile = document.createElement("canvas");
+        toile.width = Math.max(1, Math.round(image.width * echelle));
+        toile.height = Math.max(1, Math.round(image.height * echelle));
+        toile.getContext("2d").drawImage(image, 0, 0, toile.width, toile.height);
+        const reduite = toile.toDataURL("image/jpeg", PHOTO_QUALITE);
+        // Si la reduction n'a rien donne (vieux navigateur), on garde la photo telle quelle.
+        resolve(reduite && reduite.startsWith("data:image/jpeg") && reduite.length < base64DataUrl.length ? reduite : base64DataUrl);
+      } catch (e) {
+        resolve(base64DataUrl);
+      }
+    };
+    image.onerror = () => resolve(base64DataUrl);
+    image.src = base64DataUrl;
+  });
+}
+
+function photoEnAttente(client) {
+  return !!client.photo_base64 && !client.photo_url;
+}
+
 function base64VersBlob(base64DataUrl) {
   const parties = base64DataUrl.split(",");
   const typeMime = parties[0].match(/:(.*?);/)[1];
@@ -996,7 +1027,7 @@ async function enregistrerClientInterne() {
   let photoBase64 = null;
   if (fichierPhoto) {
     try {
-      photoBase64 = await fichierVersBase64(fichierPhoto);
+      photoBase64 = await reduirePhoto(await fichierVersBase64(fichierPhoto));
     } catch (e) {
       photoBase64 = null;
     }
@@ -1062,19 +1093,30 @@ document.getElementById("nc-photo-galerie").addEventListener("change", (e) => {
 async function televerserPhoto(blob, nomFichier) {
   const url = `${SUPABASE_URL}/storage/v1/object/photos_clients/${nomFichier}`;
   const entetesAuth = await enTetesAuth();
-  const reponse = await fetch(url, {
+  const reponse = await fetchAvecDelai(url, {
     method: "POST",
     headers: {
       ...entetesAuth,
       "Content-Type": blob.type || "image/jpeg"
     },
     body: blob
-  });
+  }, 60000);
   if (!reponse.ok) {
     const texteErreur = await reponse.text();
-    throw new Error(`Echec upload photo : ${reponse.status} -- ${texteErreur.slice(0, 150)}`);
+    // Deja au bureau (un envoi precedent a reussi mais la reponse s'est perdue) : c'est bon.
+    const dejaEnvoyee = reponse.status === 409 || /duplicate|already exists/i.test(texteErreur);
+    if (!dejaEnvoyee) throw new Error(`Echec upload photo : ${reponse.status} -- ${texteErreur.slice(0, 150)}`);
   }
   return `${SUPABASE_URL}/storage/v1/object/public/photos_clients/${nomFichier}`;
+}
+
+// Envoie la photo d'un client (reduite). Le nom du fichier est toujours l'identifiant du client :
+// le bureau la retrouve ainsi meme quand elle part apres la fiche du client.
+async function envoyerPhotoClient(client) {
+  const photoReduite = await reduirePhoto(client.photo_base64);
+  client.photo_url = await televerserPhoto(base64VersBlob(photoReduite), `${client.id_local}.jpg`);
+  client.photo_base64 = null; // envoyee : inutile de la garder (elle alourdit chaque ecran)
+  await stockerObjet("clients", client);
 }
 
 function afficherRappelFinCycle() {
@@ -1784,6 +1826,7 @@ let pageCourante = "mise";
 async function totalEnAttente() {
   let total = 0;
   for (const magasin of MAGASINS_A_ENVOYER) total += (await listerObjets(magasin)).filter(x => !x.synchronise).length;
+  total += (await listerObjets("clients")).filter(c => c.synchronise && photoEnAttente(c)).length;
   return total;
 }
 
@@ -1814,7 +1857,9 @@ window.addEventListener("offline", actualiserBandeauEnvoi);
 setInterval(actualiserBandeauEnvoi, 60000);
 
 async function rafraichirListeAttente() {
-  const clients = (await listerObjets("clients")).filter(c => !c.synchronise);
+  const tousLesClients = await listerObjets("clients");
+  const clients = tousLesClients.filter(c => !c.synchronise);
+  const photosEnRetard = tousLesClients.filter(c => c.synchronise && photoEnAttente(c));
   const mises = (await listerObjets("mises")).filter(m => !m.synchronise);
   const demandesCredit = (await listerObjets("demandes_credit")).filter(d => !d.synchronise);
   const confirmationsRemise = (await listerObjets("confirmations_remise")).filter(c => !c.synchronise);
@@ -1829,7 +1874,7 @@ async function rafraichirListeAttente() {
   const rienEl = document.getElementById("rien-attente");
 
   conteneur.innerHTML = "";
-  const total = clients.length + mises.length + demandesCredit.length + confirmationsRemise.length + fermeturesVolontaires.length + reprisesHistoriques.length + rattrapages.length + operationsCarnet.length + confirmationsPenalite.length + misesSupprimees.length + signalements.length;
+  const total = clients.length + photosEnRetard.length + mises.length + demandesCredit.length + confirmationsRemise.length + fermeturesVolontaires.length + reprisesHistoriques.length + rattrapages.length + operationsCarnet.length + confirmationsPenalite.length + misesSupprimees.length + signalements.length;
   rienEl.style.display = total === 0 ? "block" : "none";
   const compteurEl = document.getElementById("nav-compteur-attente");
   compteurEl.textContent = total;
@@ -1837,7 +1882,10 @@ async function rafraichirListeAttente() {
   mettreAJourBandeauEnvoi(total);
 
   clients.forEach(c => {
-    conteneur.innerHTML += `<div class="ligne-attente"><span>Client : ${echapper(c.nom)}</span><span class="badge">en attente</span></div>`;
+    conteneur.innerHTML += `<div class="ligne-attente"><span>Client : ${echapper(c.nom)}${photoEnAttente(c) ? " (avec sa photo)" : ""}</span><span class="badge">en attente</span></div>`;
+  });
+  photosEnRetard.forEach(c => {
+    conteneur.innerHTML += `<div class="ligne-attente"><span>Photo du client ${echapper(c.nom)}</span><span class="badge">en attente</span></div>`;
   });
   mises.forEach(m => {
     const carnetConnu = m.numero_carnet ? decrireCarnet(m.numero_carnet).carnet : null;
@@ -1896,17 +1944,16 @@ async function synchroniserInterne() {
   let echecs = 0;
   const detailsErreurs = [];
 
+  const photosDejaEssayees = new Set(); // une photo n'est essayee qu'une fois par envoi
   const clients = (await listerObjets("clients")).filter(c => !c.synchronise);
   for (const client of clients) {
+    // La photo d'abord. Si elle ne part pas, la fiche du client part quand meme (il lui faut
+    // son numero de carnet) et la photo reste dans le telephone : elle repartira au prochain envoi.
     try {
-      if (client.photo_base64 && !client.photo_url) {
-        const blobPhoto = base64VersBlob(client.photo_base64);
-        const nomFichier = `${client.id_local}.jpg`;
-        client.photo_url = await televerserPhoto(blobPhoto, nomFichier);
-        await stockerObjet("clients", client);
-      }
+      if (photoEnAttente(client)) await envoyerPhotoClient(client);
     } catch (e) {
-      detailsErreurs.push(`Photo client ${client.nom} : ${e.message}`);
+      photosDejaEssayees.add(client.id_local);
+      detailsErreurs.push(`Photo du client ${client.nom} : pas partie, elle repartira au prochain envoi (${e.message})`);
     }
 
     const corps = { ...client };
@@ -1920,7 +1967,6 @@ async function synchroniserInterne() {
       }, 30000);
       if (reponse.ok) {
         client.synchronise = true;
-        if (client.photo_url) client.photo_base64 = null; // envoyee : inutile de la garder (elle alourdit chaque ecran)
         await stockerObjet("clients", client);
         envoyes++;
       } else {
@@ -1930,6 +1976,18 @@ async function synchroniserInterne() {
       }
     } catch (e) {
       detailsErreurs.push(`Client ${client.nom} : erreur reseau -- ${e.message}`);
+      echecs++;
+    }
+  }
+
+  // Photos restees dans le telephone alors que la fiche du client est deja partie : nouvel essai.
+  const photosEnRetard = (await listerObjets("clients")).filter(c => c.synchronise && photoEnAttente(c) && !photosDejaEssayees.has(c.id_local));
+  for (const client of photosEnRetard) {
+    try {
+      await envoyerPhotoClient(client);
+      envoyes++;
+    } catch (e) {
+      detailsErreurs.push(`Photo du client ${client.nom} : pas partie, elle repartira au prochain envoi (${e.message})`);
       echecs++;
     }
   }
