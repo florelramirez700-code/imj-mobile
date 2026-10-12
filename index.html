@@ -448,7 +448,7 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.10.11-1";
+const VERSION_APP = "2026.10.12-1";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
@@ -641,7 +641,20 @@ let dateListeCarnets = null;
 let codeAgentConnecte = null;
 const CHAMPS_NUMERO_CARNET = ["m-carnet", "cr-carnet", "fc-carnet"];
 
+// Les mises gardees dans ce telephone, pour dire ce que le bureau n'a pas encore compte sur un carnet.
+let misesDuTelephone = [];
+
+async function rechargerMisesDuTelephone() {
+  try {
+    misesDuTelephone = await listerObjets("mises");
+  } catch (erreur) {
+    misesDuTelephone = [];
+  }
+  CHAMPS_NUMERO_CARNET.forEach(afficherNomDuCarnet);
+}
+
 async function chargerListeCarnets() {
+  await rechargerMisesDuTelephone();
   const copie = await lireObjet("copies_ecrans", "carnets");
   const copieNumeros = await lireObjet("copies_ecrans", "numeros_carnets");
   carnetsConnus = copie ? new Map(copie.donnees.map(c => [Number(c.numero_carnet), c])) : new Map();
@@ -651,10 +664,18 @@ async function chargerListeCarnets() {
 
 async function telechargerListeCarnets() {
   try {
-    const reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/carnets_mobile?select=numero_carnet,code_agent,nom_client,type_carnet,mise`, {
+    // Avec la position du carnet (cases, page, derniere mise). Tant que le bureau n'a pas ajoute ces
+    // colonnes sur le serveur, la demande est refusee : on redemande la liste comme avant.
+    let reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/carnets_mobile?select=numero_carnet,code_agent,nom_client,type_carnet,mise,cases,total_verse,page_du,page_ouverte,derniere_mise,updated_at`, {
       headers: await enTetesAuth(),
       cache: "no-store"
     }, 15000);
+    if (!reponse.ok && reponse.status === 400) {
+      reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/carnets_mobile?select=numero_carnet,code_agent,nom_client,type_carnet,mise`, {
+        headers: await enTetesAuth(),
+        cache: "no-store"
+      }, 15000);
+    }
     if (reponse.ok) {
       const carnets = await reponse.json();
       // Une liste vide ne remplace jamais la copie : tous les numeros deviendraient "inconnus".
@@ -679,6 +700,67 @@ async function telechargerListeCarnets() {
   CHAMPS_NUMERO_CARNET.forEach(afficherNomDuCarnet);
 }
 
+function jourCourt(dateIso) {
+  const morceaux = String(dateIso || "").slice(0, 10).split("-");
+  return morceaux.length === 3 ? `${morceaux[2]}/${morceaux[1]}` : "";
+}
+
+// Cases saisies dans ce telephone que le bureau n'a pas encore comptees : pas encore envoyees, ou
+// envoyees apres le dernier passage du bureau (momentBureau).
+function casesPasEncoreComptees(numero, momentBureau) {
+  const limite = momentBureau ? new Date(momentBureau).getTime() : 0;
+  let cases = 0;
+  misesDuTelephone.forEach(m => {
+    if (Number(m.numero_carnet) !== Number(numero)) return;
+    const moment = new Date(m.synchronise_le || m.created_at || 0).getTime();
+    if (!m.synchronise || moment > limite) cases += Number(m.nombre_mise) || 0;
+  });
+  return cases;
+}
+
+// Ou en est le carnet d'apres le bureau (liste envoyee a chaque passage du pont), plus ce que ce
+// telephone a saisi depuis. "" tant que le bureau n'envoie pas la position.
+function decrirePosition(carnet) {
+  if (!carnet || carnet.page_ouverte === undefined || carnet.page_ouverte === null) return "";
+  const CASES_PAR_PAGE = 31;
+  const d = carnet.updated_at ? new Date(carnet.updated_at) : null;
+  const deux = n => String(n).padStart(2, "0");
+  const quand = d ? ` (le ${deux(d.getDate())}/${deux(d.getMonth() + 1)} a ${deux(d.getHours())} h ${deux(d.getMinutes())})` : "";
+  const enAttente = casesPasEncoreComptees(carnet.numero_carnet, carnet.updated_at);
+  const derniere = carnet.derniere_mise ? `, derniere mise le ${jourCourt(carnet.derniere_mise)}` : "";
+
+  if (carnet.type_carnet === "bloque") {
+    let texte = `Au bureau${quand} : ${Number(carnet.total_verse) || 0} F verses${derniere}.`;
+    if (enAttente) texte += ` + ${enAttente} mise(s) dans ce telephone, pas encore comptee(s) au bureau.`;
+    return texte;
+  }
+  if (!carnet.page_du) {
+    return `Au bureau${quand} : aucune mise sur ce carnet.` + (enAttente ? ` + ${enAttente} case(s) dans ce telephone, pas encore comptee(s).` : "");
+  }
+  const cases = Number(carnet.cases) || 0;
+  if (!carnet.page_ouverte) {
+    let texte = `Au bureau${quand} : la page du ${jourCourt(carnet.page_du)} est terminee (${cases} cases). La prochaine mise ouvre une nouvelle page.`;
+    if (enAttente) texte += ` Deja ${enAttente} case(s) dans ce telephone, pas encore comptee(s) au bureau.`;
+    return texte;
+  }
+  let texte = `Au bureau${quand} : page du ${jourCourt(carnet.page_du)}, ${cases} case(s) sur ${CASES_PAR_PAGE}${derniere}.`;
+  const total = cases + enAttente;
+  if (enAttente) {
+    texte += ` + ${enAttente} case(s) dans ce telephone, pas encore comptee(s) : ${Math.min(total, CASES_PAR_PAGE)} sur ${CASES_PAR_PAGE}.`;
+  }
+  if (total >= CASES_PAR_PAGE) {
+    texte += total > CASES_PAR_PAGE
+      ? ` La page est pleine : ${total - CASES_PAR_PAGE} case(s) vont sur une nouvelle page.`
+      : " La page est pleine : la prochaine mise ouvre une nouvelle page.";
+  } else {
+    texte += ` Il reste ${CASES_PAR_PAGE - total} case(s).`;
+    const debut = new Date(carnet.page_du + "T00:00:00");
+    const jours = Math.floor((maintenant().getTime() - debut.getTime()) / 86400000);
+    if (jours > 30) texte += " Attention : cette page a plus de 31 jours, la prochaine mise peut ouvrir une nouvelle page.";
+  }
+  return texte;
+}
+
 // Ce que le telephone sait d'un numero : le carnet s'il est connu, sinon null.
 // Sans liste dans le telephone, rien n'est jamais dit "inconnu".
 function decrireCarnet(numero) {
@@ -689,6 +771,7 @@ function decrireCarnet(numero) {
     return {
       carnet: carnet,
       texte: `${carnet.nom_client} -- ${detail}${autreAgent ? `. ATTENTION : carnet suivi par ${carnet.code_agent}.` : ""}`,
+      position: decrirePosition(carnet),
       couleur: autreAgent ? "#E99A0C" : "#0D581A",
     };
   }
@@ -715,6 +798,16 @@ function afficherNomDuCarnet(idChamp) {
   const description = numero ? decrireCarnet(numero) : { texte: "", couleur: "" };
   info.textContent = description.texte;
   info.style.color = description.couleur;
+  // La position du carnet, sur une 2e ligne plus discrete.
+  let position = document.getElementById(`${idChamp}-position`);
+  if (!position) {
+    position = document.createElement("p");
+    position.id = `${idChamp}-position`;
+    position.style.cssText = "font-size:13px; color:#212529; margin:2px 0 6px; padding:8px 10px; background:#EAF1FC; border-radius:8px;";
+    info.insertAdjacentElement("afterend", position);
+  }
+  position.textContent = description.position || "";
+  position.style.display = description.position ? "block" : "none";
 }
 
 CHAMPS_NUMERO_CARNET.forEach(idChamp => {
@@ -1857,6 +1950,7 @@ window.addEventListener("offline", actualiserBandeauEnvoi);
 setInterval(actualiserBandeauEnvoi, 60000);
 
 async function rafraichirListeAttente() {
+  await rechargerMisesDuTelephone();
   const tousLesClients = await listerObjets("clients");
   const clients = tousLesClients.filter(c => !c.synchronise);
   const photosEnRetard = tousLesClients.filter(c => c.synchronise && photoEnAttente(c));
@@ -1996,6 +2090,7 @@ async function synchroniserInterne() {
   for (const mise of mises) {
     const corps = { ...mise };
     delete corps.synchronise;
+    delete corps.synchronise_le;
     try {
       const reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/mises_mobile?on_conflict=id_local`, {
         method: "POST",
@@ -2004,6 +2099,7 @@ async function synchroniserInterne() {
       }, 30000);
       if (reponse.ok) {
         mise.synchronise = true;
+        mise.synchronise_le = maintenant().toISOString(); // pour savoir si le bureau l'a deja comptee (position du carnet)
         await stockerObjet("mises", mise);
         envoyes++;
       } else {
