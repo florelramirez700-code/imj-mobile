@@ -277,12 +277,20 @@
     <div id="page-credit" class="cache">
       <div class="carte">
         <h2>Demander un credit</h2>
-        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Indique juste le numero de carnet -- le systeme verifie automatiquement si le client est eligible et envoie la demande a valider si c'est le cas.</p>
+        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Indique le numero de carnet et le credit que le client veut. Le bureau verifie s'il y a droit : la reponse, avec la raison si c'est non, arrive dans « Mes demandes de credit ».</p>
         <label>Numero de carnet *</label>
         <input type="number" id="cr-carnet" inputmode="numeric">
           <p id="cr-carnet-info" style="font-size:14px; font-weight:600; margin:6px 0 2px;"></p>
+        <label>Credit demande *</label>
+        <select id="cr-type">
+          <option value="">-- Choisir --</option>
+          <option value="Dizaine">Dizaine (a partir de la case 11)</option>
+          <option value="Quinzaine">Quinzaine (a partir de la case 16)</option>
+          <option value="Mensuel">Mensuel (page pleine, case 31)</option>
+          <option value="X3">X3 (credit sur compte epargne)</option>
+        </select>
         <label>Commentaire (optionnel)</label>
-        <input type="text" id="cr-commentaire" placeholder="Ex: client souhaite un credit Dizaine">
+        <input type="text" id="cr-commentaire" placeholder="Ex: pour son commerce">
         <button onclick="enregistrerDemandeCredit()">Envoyer la demande</button>
         <p id="cr-message"></p>
       </div>
@@ -448,7 +456,7 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.10.12-1";
+const VERSION_APP = "2026.10.12-2";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
@@ -1315,15 +1323,22 @@ async function enregistrerDemandeCreditInterne() {
     messageEl.textContent = "Le numero de carnet est obligatoire.";
     return;
   }
+  const typeDemande = document.getElementById("cr-type").value;
+  if (!typeDemande) {
+    messageEl.textContent = "Choisis le credit que le client demande.";
+    return;
+  }
 
   const session = await lireObjet("session", "agent");
   const idLocal = genererUUID();
+  // Le type choisi part en tete du commentaire : le bureau le lit la pour creer la bonne demande.
+  const commentaireLibre = document.getElementById("cr-commentaire").value.trim();
 
   const demande = {
     id_local: idLocal,
     agent_id: session.code,
     numero_carnet: carnet,
-    commentaire: document.getElementById("cr-commentaire").value.trim(),
+    commentaire: typeDemande + (commentaireLibre ? " -- " + commentaireLibre : ""),
     date_demande: maintenant().toISOString().split("T")[0],
     created_at: maintenant().toISOString(),
     statut_traitement: "en_attente",
@@ -1337,6 +1352,7 @@ async function enregistrerDemandeCreditInterne() {
   document.getElementById("cr-carnet").value = "";
   afficherNomDuCarnet("cr-carnet");
   document.getElementById("cr-commentaire").value = "";
+  document.getElementById("cr-type").value = "";
   rafraichirListeAttente();
 }
 
@@ -1411,18 +1427,16 @@ async function chargerMesDemandes() {
     }
 
     messageEl.textContent = mentionCopie(dateCopie).trim();
-    const dejaConfirmesDemandes = await creditsDejaConfirmes();
     let htmlDemandes = "";
     for (const d of demandes) {
+      const estApprouvee = d.resultat_message && d.resultat_message.includes("Approuvee");
       let classeStatut = "badge";
-      let texteStatut = "en attente";
-      if (d.statut_traitement === "verifie") { classeStatut = "badge"; texteStatut = "verifie"; }
-      if (d.statut_traitement === "traite") { classeStatut = "badge ok"; texteStatut = "traite"; }
-      if (d.statut_traitement === "erreur") { classeStatut = "badge"; texteStatut = "erreur"; }
-
-      const estApprouvee = d.resultat_message && d.resultat_message.includes("Approuvee") && d.credit_demande_ids;
-      const premierCreditId = estApprouvee ? d.credit_demande_ids.split(",")[0].trim() : null;
-      const dejaConfirme = premierCreditId && dejaConfirmesDemandes.has(Number(premierCreditId));
+      let texteStatut = "envoyee";
+      // verifie : le bureau a regarde. Avec un numero de demande, elle attend sa validation ; sans, le client n'y a pas droit.
+      if (d.statut_traitement === "verifie") texteStatut = d.credit_demande_ids ? "au bureau" : "pas de droit";
+      if (d.statut_traitement === "traite") texteStatut = (d.resultat_message || "").includes("Refusee") ? "refusee" : ((d.resultat_message || "").includes("Expiree") ? "expiree" : "traite");
+      if (d.statut_traitement === "erreur") texteStatut = "erreur";
+      if (estApprouvee) { classeStatut = "badge ok"; texteStatut = "approuvee"; }
 
       htmlDemandes += `
         <div class="ligne-attente" style="flex-direction:column; align-items:flex-start;">
@@ -1430,9 +1444,9 @@ async function chargerMesDemandes() {
             <span><b>Carnet ${echapper(d.numero_carnet)}</b></span>
             <span class="${classeStatut}">${texteStatut}</span>
           </div>
+          ${d.commentaire ? `<span style="font-size:12px; color:#6C757D; margin-top:2px;">Demande : ${echapper(d.commentaire)}</span>` : ""}
           ${d.resultat_message ? `<span style="font-size:13px; color:#212529; margin-top:4px;">${echapper(d.resultat_message)}</span>` : ""}
-          ${estApprouvee && !dejaConfirme ? `<span style="font-size:13px; color:#92400E; margin-top:6px;">Credit approuve. Il apparaitra dans « Credits a remettre au client » (en haut) quand la caissiere t'aura remis l'argent.</span>` : ""}
-          ${dejaConfirme ? `<span style="font-size:13px; color:#198754; margin-top:6px;">Remise confirmee sur ce telephone.</span>` : ""}
+          ${estApprouvee ? `<span style="font-size:13px; color:#92400E; margin-top:6px;">Credit approuve. La remise se suit dans « Credits a remettre au client » (en haut), quand la caissiere t'a remis l'argent.</span>` : ""}
         </div>`;
     }
     conteneur.innerHTML = htmlDemandes;
