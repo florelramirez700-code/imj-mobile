@@ -456,7 +456,7 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.10.12-2";
+const VERSION_APP = "2026.10.15-1";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
@@ -672,12 +672,19 @@ async function chargerListeCarnets() {
 
 async function telechargerListeCarnets() {
   try {
-    // Avec la position du carnet (cases, page, derniere mise). Tant que le bureau n'a pas ajoute ces
-    // colonnes sur le serveur, la demande est refusee : on redemande la liste comme avant.
-    let reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/carnets_mobile?select=numero_carnet,code_agent,nom_client,type_carnet,mise,cases,total_verse,page_du,page_ouverte,derniere_mise,updated_at`, {
+    // Avec la position du carnet (cases, page, derniere mise) et ce qu'il faut pour bloquer une mise
+    // (derniere page, credit en cours, fin de la page). Tant que le bureau n'a pas ajoute ces colonnes
+    // sur le serveur, la demande est refusee : on redemande avec moins de colonnes.
+    let reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/carnets_mobile?select=numero_carnet,code_agent,nom_client,type_carnet,mise,cases,total_verse,page_du,page_ouverte,derniere_mise,derniere_page,credit_en_cours,fin_page,updated_at`, {
       headers: await enTetesAuth(),
       cache: "no-store"
     }, 15000);
+    if (!reponse.ok && reponse.status === 400) {
+      reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/carnets_mobile?select=numero_carnet,code_agent,nom_client,type_carnet,mise,cases,total_verse,page_du,page_ouverte,derniere_mise,updated_at`, {
+        headers: await enTetesAuth(),
+        cache: "no-store"
+      }, 15000);
+    }
     if (!reponse.ok && reponse.status === 400) {
       reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/carnets_mobile?select=numero_carnet,code_agent,nom_client,type_carnet,mise`, {
         headers: await enTetesAuth(),
@@ -769,6 +776,76 @@ function decrirePosition(carnet) {
   return texte;
 }
 
+// Ajoute a la position : ce qui peut faire refuser une mise (voir blocageDeLaMise).
+function avertissementCarnet(carnet) {
+  if (!carnet || carnet.type_carnet === "bloque" || !carnet.page_du) return "";
+  let texte = "";
+  if (carnet.derniere_page) texte += " C'est la derniere page du carnet papier : quand elle est finie, fais le changement de carnet avant la mise.";
+  if (carnet.credit_en_cours) texte += " Credit en cours : pas de mise qui ouvre une nouvelle page ; pour solder, ramene le carnet et l'argent au bureau.";
+  return texte;
+}
+
+// Blocage de la mise (demande du 15/10/2026). Le telephone refuse une mise qui ouvrirait une
+// nouvelle page :
+// - quand le carnet papier est fini (derniere page terminee) : l'agent fait d'abord le changement
+//   de carnet, sinon le bureau refuse la mise ;
+// - quand le client a un mini-credit en cours : la 1re case d'une page revient a IMJ et ne rembourse
+//   pas, le client croirait avoir paye. L'agent ramene le carnet et l'argent au bureau.
+// "" quand la mise peut partir, ou quand le bureau n'envoie pas encore ces renseignements.
+async function blocageDeLaMise(numero, nombre) {
+  const carnet = carnetsConnus.get(Number(numero));
+  if (!carnet || carnet.type_carnet === "bloque" || carnet.derniere_page === undefined || carnet.derniere_page === null) return "";
+  const CASES_PAR_PAGE = 31;
+  const aujourdhui = maintenant().toISOString().split("T")[0];
+  const momentBureau = carnet.updated_at ? new Date(carnet.updated_at).getTime() : 0;
+
+  // Un changement de carnet (fin des pages) fait dans ce telephone depuis la derniere liste du bureau.
+  let operations = [];
+  try {
+    operations = await listerObjets("operations_carnet");
+  } catch (erreur) {
+    operations = [];
+  }
+  const changement = operations
+    .filter(o => o.type_operation === "changement" && o.motif === "fin_cycles" && Number(o.numero_carnet) === Number(numero)
+      && new Date(o.created_at).getTime() > momentBureau)
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+
+  let casesPage, derniere;
+  if (changement) {
+    // Nouveau carnet papier : sa 1re page est faite des mises saisies depuis le changement.
+    const depuis = new Date(changement.created_at).getTime();
+    casesPage = misesDuTelephone
+      .filter(m => Number(m.numero_carnet) === Number(numero) && new Date(m.created_at).getTime() > depuis)
+      .reduce((total, m) => total + (Number(m.nombre_mise) || 0), 0);
+    derniere = false;
+  } else {
+    const enAttente = casesPasEncoreComptees(numero, carnet.updated_at);
+    const pageTerminee = !carnet.page_du || !carnet.page_ouverte || (carnet.fin_page && aujourdhui > carnet.fin_page);
+    casesPage = pageTerminee ? enAttente : (Number(carnet.cases) || 0) + enAttente;
+    derniere = Boolean(carnet.derniere_page);
+  }
+
+  const ouvreUnePage = casesPage === 0 || casesPage >= CASES_PAR_PAGE || casesPage + nombre > CASES_PAR_PAGE;
+  if (!ouvreUnePage) return "";
+  const reste = casesPage > 0 && casesPage < CASES_PAR_PAGE ? CASES_PAR_PAGE - casesPage : 0;
+  const auPlus = reste ? `\n\nIl reste ${reste} case(s) sur la page : tu peux saisir au plus ${reste} case(s).` : "";
+  const auBureau = "Ne saisis rien : ramene le carnet et l'argent au bureau.";
+
+  if (derniere) {
+    return "Mise refusee : le carnet papier de ce client est fini (derniere page terminee).\n\n"
+      + (carnet.credit_en_cours
+        ? `Ce client a un credit en cours. ${auBureau}`
+        : "Fais d'abord le changement de carnet (Plus, Gerer un carnet, Remplacer un carnet, motif fin des cycles) : le client paie le nouveau carnet. Ensuite saisis la mise.")
+      + auPlus;
+  }
+  if (carnet.credit_en_cours) {
+    return "Mise refusee : ce client a un credit en cours et cette mise ouvrirait une nouvelle page. "
+      + "La 1re case d'une page revient a IMJ et ne rembourse pas le credit.\n\n" + auBureau + auPlus;
+  }
+  return "";
+}
+
 // Ce que le telephone sait d'un numero : le carnet s'il est connu, sinon null.
 // Sans liste dans le telephone, rien n'est jamais dit "inconnu".
 function decrireCarnet(numero) {
@@ -779,7 +856,7 @@ function decrireCarnet(numero) {
     return {
       carnet: carnet,
       texte: `${carnet.nom_client} -- ${detail}${autreAgent ? `. ATTENTION : carnet suivi par ${carnet.code_agent}.` : ""}`,
-      position: decrirePosition(carnet),
+      position: decrirePosition(carnet) + avertissementCarnet(carnet),
       couleur: autreAgent ? "#E99A0C" : "#0D581A",
     };
   }
@@ -1284,6 +1361,12 @@ async function enregistrerMiseInterne() {
     }
     if (!montantAccepte(carnet, montant)) {
       messageEl.textContent = "Mise non enregistree : corrige le montant.";
+      return;
+    }
+    const blocage = await blocageDeLaMise(carnet, nombre);
+    if (blocage) {
+      alert(blocage);
+      messageEl.textContent = blocage;
       return;
     }
     mise.numero_carnet = carnet;
