@@ -376,11 +376,20 @@
           <label>Numero du carnet a remplacer *</label>
           <input type="number" id="gc-numero-carnet">
           <label>Motif *</label>
-          <select id="gc-motif">
+          <select id="gc-motif" onchange="changerMotifCarnet()">
             <option value="fin_cycles">Fin des cycles prevus</option>
             <option value="perte">Carnet perdu</option>
             <option value="endommage">Carnet abime</option>
           </select>
+          <div id="gc-bloc-categorie">
+            <label>Categorie du nouveau carnet</label>
+            <select id="gc-categorie-changement">
+              <option value="">Meme que l'ancien</option>
+              <option value="junior">Junior</option>
+              <option value="senior">Senior</option>
+            </select>
+            <p style="font-size:12px; color:#9B9CA1; margin:6px 0 0;">Carnet ordinaire seulement. Le client garde son numero et paie le carnet de la categorie choisie.</p>
+          </div>
         </div>
 
         <button onclick="enregistrerOperationCarnet()">Enregistrer</button>
@@ -456,7 +465,7 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.10.15-1";
+const VERSION_APP = "2026.10.15-2";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
@@ -1638,6 +1647,14 @@ function changerTypeOperationCarnet() {
   clientExistantTrouve = null;
   document.getElementById("gc-nom-trouve").textContent = "";
   document.getElementById("gc-recherche-message").textContent = "";
+  changerMotifCarnet();
+}
+
+// Le client junior peut passer senior (ou l'inverse) seulement a la fin des pages.
+function changerMotifCarnet() {
+  const finDesPages = document.getElementById("gc-motif").value === "fin_cycles";
+  document.getElementById("gc-bloc-categorie").className = finDesPages ? "visible" : "cache";
+  if (!finDesPages) document.getElementById("gc-categorie-changement").value = "";
 }
 
 async function enregistrerOperationCarnet() {
@@ -1677,6 +1694,15 @@ async function enregistrerOperationCarnetInterne() {
     if (!numeroCarnet) { messageEl.textContent = "Le numero du carnet est obligatoire."; return; }
     operation.numero_carnet = parseInt(numeroCarnet);
     operation.motif = document.getElementById("gc-motif").value;
+    const categorie = operation.motif === "fin_cycles" ? document.getElementById("gc-categorie-changement").value : "";
+    if (categorie) {
+      const carnet = carnetsConnus.get(operation.numero_carnet);
+      if (carnet && carnet.type_carnet === "bloque") {
+        messageEl.textContent = "Un carnet bloque ne change pas de categorie. Laisse \"Meme que l'ancien\", ou ouvre un carnet supplementaire.";
+        return;
+      }
+      operation.categorie = categorie;
+    }
   }
 
   await stockerObjet("operations_carnet", operation);
@@ -1686,6 +1712,7 @@ async function enregistrerOperationCarnetInterne() {
   document.getElementById("gc-telephone-recherche").value = "";
   document.getElementById("gc-mise").value = "";
   document.getElementById("gc-numero-carnet").value = "";
+  document.getElementById("gc-categorie-changement").value = "";
   clientExistantTrouve = null;
   document.getElementById("gc-nom-trouve").textContent = "";
   rafraichirListeAttente();
@@ -2108,7 +2135,7 @@ async function rafraichirListeAttente() {
     conteneur.innerHTML += `<div class="ligne-attente"><span>Confirmation penalite #${echapper(c.penalite_id)}</span><span class="badge">en attente</span></div>`;
   });
   operationsCarnet.forEach(o => {
-    const libelles = { nouveau_client: `Nouveau client -- ${echapper(o.nom_client)}`, carnet_existant: `Carnet suppl. -- ${echapper(o.telephone_client)}`, changement: `Changement carnet ${echapper(o.numero_carnet)}` };
+    const libelles = { nouveau_client: `Nouveau client -- ${echapper(o.nom_client)}`, carnet_existant: `Carnet suppl. -- ${echapper(o.telephone_client)}`, changement: `Changement carnet ${echapper(o.numero_carnet)}${o.categorie ? ` (passe ${echapper(o.categorie)})` : ""}` };
     conteneur.innerHTML += `<div class="ligne-attente"><span>${libelles[o.type_operation] || "Operation carnet"}</span><span class="badge">en attente</span></div>`;
   });
 }
