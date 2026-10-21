@@ -465,7 +465,7 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.10.15-2";
+const VERSION_APP = "2026.10.21-1";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
@@ -790,16 +790,14 @@ function avertissementCarnet(carnet) {
   if (!carnet || carnet.type_carnet === "bloque" || !carnet.page_du) return "";
   let texte = "";
   if (carnet.derniere_page) texte += " C'est la derniere page du carnet papier : quand elle est finie, fais le changement de carnet avant la mise.";
-  if (carnet.credit_en_cours) texte += " Credit en cours : pas de mise qui ouvre une nouvelle page ; pour solder, ramene le carnet et l'argent au bureau.";
   return texte;
 }
 
 // Blocage de la mise (demande du 15/10/2026). Le telephone refuse une mise qui ouvrirait une
-// nouvelle page :
-// - quand le carnet papier est fini (derniere page terminee) : l'agent fait d'abord le changement
-//   de carnet, sinon le bureau refuse la mise ;
-// - quand le client a un mini-credit en cours : la 1re case d'une page revient a IMJ et ne rembourse
-//   pas, le client croirait avoir paye. L'agent ramene le carnet et l'argent au bureau.
+// nouvelle page quand le carnet papier est fini (derniere page terminee) : l'agent fait d'abord le
+// changement de carnet, sinon le bureau refuse la mise.
+// Un credit en cours, meme en retard, ne bloque plus (21/10/2026) : apres les 5 jours de grace la
+// nouvelle page s'ouvre et ses mises remboursent le credit ; le carnet revient au bureau une fois solde.
 // "" quand la mise peut partir, ou quand le bureau n'envoie pas encore ces renseignements.
 async function blocageDeLaMise(numero, nombre) {
   const carnet = carnetsConnus.get(Number(numero));
@@ -839,18 +837,11 @@ async function blocageDeLaMise(numero, nombre) {
   if (!ouvreUnePage) return "";
   const reste = casesPage > 0 && casesPage < CASES_PAR_PAGE ? CASES_PAR_PAGE - casesPage : 0;
   const auPlus = reste ? `\n\nIl reste ${reste} case(s) sur la page : tu peux saisir au plus ${reste} case(s).` : "";
-  const auBureau = "Ne saisis rien : ramene le carnet et l'argent au bureau.";
 
   if (derniere) {
     return "Mise refusee : le carnet papier de ce client est fini (derniere page terminee).\n\n"
-      + (carnet.credit_en_cours
-        ? `Ce client a un credit en cours. ${auBureau}`
-        : "Fais d'abord le changement de carnet (Plus, Gerer un carnet, Remplacer un carnet, motif fin des cycles) : le client paie le nouveau carnet. Ensuite saisis la mise.")
+      + "Fais d'abord le changement de carnet (Plus, Gerer un carnet, Remplacer un carnet, motif fin des cycles) : le client paie le nouveau carnet. Ensuite saisis la mise."
       + auPlus;
-  }
-  if (carnet.credit_en_cours) {
-    return "Mise refusee : ce client a un credit en cours et cette mise ouvrirait une nouvelle page. "
-      + "La 1re case d'une page revient a IMJ et ne rembourse pas le credit.\n\n" + auBureau + auPlus;
   }
   return "";
 }
