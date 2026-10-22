@@ -465,7 +465,7 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.10.21-1";
+const VERSION_APP = "2026.10.22-1";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
@@ -1335,6 +1335,7 @@ async function enregistrerMiseInterne() {
 
   const session = await lireObjet("session", "agent");
   const idLocal = genererUUID();
+  let gardeeMalgreRefus = false;
 
   const mise = {
     id_local: idLocal,
@@ -1363,11 +1364,19 @@ async function enregistrerMiseInterne() {
       messageEl.textContent = "Mise non enregistree : corrige le montant.";
       return;
     }
+    // Le client a peut-etre deja donne l'argent : une mise jetee ici ne serait plus nulle part et
+    // l'argent rapporte au bureau resterait sans explication. Gardee, elle part au bureau, qui la
+    // refuse tant que le changement n'est pas fait (liste des mises en erreur, a relancer ensuite).
     const blocage = await blocageDeLaMise(carnet, nombre);
     if (blocage) {
-      alert(blocage);
-      messageEl.textContent = blocage;
-      return;
+      const garder = confirm(blocage.replace("Mise refusee : ", "Le bureau va refuser cette mise : ")
+        + "\n\nAnnuler : ne rien enregistrer (fais d'abord le changement de carnet, puis la mise)."
+        + "\nOK : le client a deja donne l'argent, garder la mise quand meme. Elle part au bureau, qui la relancera une fois le changement fait.");
+      if (!garder) {
+        messageEl.textContent = blocage;
+        return;
+      }
+      gardeeMalgreRefus = true;
     }
     mise.numero_carnet = carnet;
   } else {
@@ -1381,11 +1390,12 @@ async function enregistrerMiseInterne() {
 
   await stockerObjet("mises", mise);
 
-  messageEl.className = "succes";
+  messageEl.className = gardeeMalgreRefus ? "erreur" : "succes";
   const carnetDeLaMise = mise.numero_carnet ? decrireCarnet(mise.numero_carnet).carnet : null;
   messageEl.textContent = carnetDeLaMise
     ? `Mise enregistree pour ${carnetDeLaMise.nom_client} (carnet ${mise.numero_carnet}). Sera synchronisee plus tard.`
     : "Mise enregistree localement. Sera synchronisee plus tard.";
+  if (gardeeMalgreRefus) messageEl.textContent += " Le bureau la refusera jusqu'au changement de carnet : fais le changement, le bureau la relancera.";
   document.getElementById("m-carnet").value = "";
   afficherNomDuCarnet("m-carnet");
   document.getElementById("m-montant").value = "";
