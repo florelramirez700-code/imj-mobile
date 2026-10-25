@@ -4,7 +4,7 @@
 // version (les mises a jour arrivent normalement) et on en garde une copie ;
 // sans internet, on sert la derniere copie gardee.
 // Les appels a Supabase (autre adresse) ne sont JAMAIS touches ni gardes.
-const CACHE = "imj-mobile-v1";
+const CACHE = "imj-mobile-v2";
 // pointage.html : la page du telephone de pointage du bureau, qui doit s'ouvrir meme pendant une coupure.
 const FICHIERS = ["./", "index.html", "manifest.json", "logo.png", "pointage.html", "manifest-pointage.json"];
 
@@ -13,9 +13,15 @@ self.addEventListener("install", (evenement) => {
   self.skipWaiting();
 });
 
+// Au changement de version, on n'efface que les anciennes copies de CETTE appli.
+// Les applis de cours (ECM, HG, Francais) et les autres applis IMJ sont a la meme adresse
+// (florelramirez700-code.github.io) et partagent le meme stockage : on n'y touche pas.
+// "imj-mobile-v" et pas "imj-mobile-" : sinon on effacerait aussi les copies de l'appli test (imj-mobile-test-v...).
 self.addEventListener("activate", (evenement) => {
   evenement.waitUntil(
-    caches.keys().then((cles) => Promise.all(cles.filter((cle) => cle !== CACHE).map((cle) => caches.delete(cle))))
+    caches.keys().then((cles) => Promise.all(
+      cles.filter((cle) => cle.startsWith("imj-mobile-v") && cle !== CACHE).map((cle) => caches.delete(cle))
+    ))
   );
   self.clients.claim();
 });
