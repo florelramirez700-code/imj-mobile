@@ -339,17 +339,17 @@
 
     <div id="page-mon-papier" class="cache">
       <div class="carte">
-        <h2>Mon papier du jour</h2>
-        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Au moment de remettre les fonds, tape le total de ta fiche papier. Il est compare avec les mises de ton telephone et avec l'argent que tu remets. Le papier ne cree aucune mise.</p>
+        <h2>Mes mises sur papier</h2>
+        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Si tu as pris des mises sur papier qui ne sont PAS dans ton telephone, tape leur total ici au moment de remettre les fonds. Il s'ajoute aux mises de ton telephone : la caisse sait ainsi combien tu dois remettre. Si toutes tes mises sont dans le telephone, ne tape rien.</p>
         <label>Jour de la fiche *</label>
         <input type="date" id="mp-date" onchange="chargerMonPapier()">
         <p id="mp-jour" style="font-size:15px; font-weight:600; margin-bottom:6px;"></p>
         <div id="mp-formulaire">
-          <label>Total de ma fiche papier (F) *</label>
+          <label>Total des mises sur papier, pas dans le telephone (F) *</label>
           <input type="number" id="mp-total" min="0" step="1" inputmode="numeric">
-          <label>Nombre de clients servis *</label>
+          <label>Nombre de clients sur papier *</label>
           <input type="number" id="mp-clients" min="0" step="1" inputmode="numeric">
-          <button onclick="validerMonPapier()">Valider mon papier</button>
+          <button onclick="validerMonPapier()">Valider mes mises sur papier</button>
           <p style="font-size:12px; color:#9B9CA1; margin-top:8px;">Attention : une fois valide, tu ne peux plus le changer.</p>
         </div>
         <div id="mp-resultat" class="cache"></div>
@@ -464,7 +464,7 @@
     <div id="page-plus" class="cache">
       <div class="carte">
         <h2>Autres operations</h2>
-        <button class="bouton-plus" onclick="allerA('mon-papier')">Mon papier du jour (a la remise des fonds)</button>
+        <button class="bouton-plus" onclick="allerA('mon-papier')">Mes mises sur papier (a la remise des fonds)</button>
         <button class="bouton-plus" onclick="allerA('credit')">Demander un credit</button>
         <button class="bouton-plus" onclick="allerA('mes-demandes')">Mes demandes de credit</button>
         <button class="bouton-plus" onclick="allerA('gerer-carnet')">Gerer un carnet (+carnet, remplacement)</button>
@@ -486,7 +486,7 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.11.11-2";
+const VERSION_APP = "2026.11.11-3";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
@@ -1927,10 +1927,11 @@ async function chargerMonRapport() {
   }
 }
 
-// ---- Mon papier du jour ---------------------------------------------------
-// Au moment de remettre les fonds, l'agent tape le total de sa fiche papier (une fiche par jour de
-// collecte : il choisit le jour). Le bureau le compare aux mises du telephone et a l'argent remis. Le total du telephone n'est PAS montre avant la validation
-// (sinon il suffirait de le recopier), et un papier valide ne se change plus depuis le telephone.
+// ---- Mes mises sur papier -------------------------------------------------
+// Au moment de remettre les fonds, l'agent tape le total des mises prises sur papier et qui ne sont
+// PAS dans son telephone (un total par jour de collecte : il choisit le jour). Au bureau, ce total
+// s'ajoute aux mises du telephone : c'est ce que l'agent doit remettre. Le papier ne cree aucune
+// mise (le bureau les saisit ensuite) et ne se change plus depuis le telephone une fois valide.
 const TOTAL_PAPIER_MAXIMUM = 5000000;
 
 const JOURS_PAPIER_EN_ARRIERE = 31;
@@ -1992,7 +1993,7 @@ async function chargerMonPapier(remettreAujourdhui) {
   const messageEl = document.getElementById("mp-message");
   messageEl.className = "";
   messageEl.textContent = "";
-  document.getElementById("mp-jour").textContent = `Papier du ${jourCourt(jour)}`;
+  document.getElementById("mp-jour").textContent = `Mises sur papier du ${jourCourt(jour)}`;
   const papier = await papierDejaValide(session.code, jour);
   const formulaire = document.getElementById("mp-formulaire");
   const resultat = document.getElementById("mp-resultat");
@@ -2005,21 +2006,11 @@ async function chargerMonPapier(remettreAujourdhui) {
   formulaire.className = "cache";
   resultat.className = "visible";
   const telephone = await totalTelephoneDuJour(session.code, jour);
-  const ecart = Number(papier.total_papier) - telephone;
-  let comparaison;
-  if (ecart === 0) {
-    comparaison = `<p class="succes" style="font-size:14px;">Pareil que ton telephone.</p>`;
-  } else if (ecart > 0) {
-    comparaison = `<p class="erreur" style="font-size:14px;"><b>ECART : ton papier a ${francsLisibles(ecart)} de plus que ton telephone.</b> Une mise oubliee sur le telephone ? Cherche-la sur ta fiche avec la caisse.</p>`;
-  } else {
-    comparaison = `<p class="erreur" style="font-size:14px;"><b>ECART : ton papier a ${francsLisibles(-ecart)} de moins que ton telephone.</b> Une mise tapee en trop ou un montant mal tape ? Cherche-la sur ta fiche avec la caisse.</p>`;
-  }
   resultat.innerHTML = `
-    <div class="ligne-attente"><span>Total de ma fiche papier</span><span><b>${echapper(francsLisibles(papier.total_papier))}</b></span></div>
-    <div class="ligne-attente"><span>Clients servis</span><span><b>${echapper(papier.nombre_clients ?? "")}</b></span></div>
     <div class="ligne-attente"><span>Mises de mon telephone ce jour-la</span><span><b>${echapper(francsLisibles(telephone))}</b></span></div>
-    ${comparaison}
-    <p style="font-size:12px; color:#9B9CA1; margin-top:8px;">Papier valide${papier.synchronise ? " et envoye au bureau" : " : il partira au prochain envoi"}. Tu ne peux plus le changer : si le total est faux, dis-le a la caisse. Pense a « Synchroniser » pour que la caisse le voie.</p>`;
+    <div class="ligne-attente"><span>Mises sur papier (${echapper(papier.nombre_clients ?? "")} client(s))</span><span><b>${echapper(francsLisibles(papier.total_papier))}</b></span></div>
+    <div class="ligne-attente"><span><b>A remettre pour les mises de ce jour</b></span><span><b>${echapper(francsLisibles(telephone + Number(papier.total_papier)))}</b></span></div>
+    <p style="font-size:12px; color:#9B9CA1; margin-top:8px;">Mises sur papier validees${papier.synchronise ? " et envoyees au bureau" : " : elles partiront au prochain envoi"}. Tu ne peux plus changer ce total : s'il est faux, dis-le a la caisse. Pense a « Synchroniser » pour que la caisse le voie. Donne ta fiche papier a la caisse pour que ces mises soient saisies.</p>`;
 }
 
 async function validerMonPapier() {
@@ -2033,16 +2024,12 @@ async function validerMonPapierInterne() {
   const clientsSaisis = document.getElementById("mp-clients").value.trim();
   const total = Number(totalSaisi);
   const clients = Number(clientsSaisis);
-  if (totalSaisi === "" || !Number.isInteger(total) || total < 0 || total > TOTAL_PAPIER_MAXIMUM) {
-    messageEl.textContent = "Tape le total de ta fiche papier (un nombre entier, sans virgule).";
+  if (totalSaisi === "" || !Number.isInteger(total) || total <= 0 || total > TOTAL_PAPIER_MAXIMUM) {
+    messageEl.textContent = "Tape le total de tes mises sur papier (un nombre entier, sans virgule).";
     return;
   }
-  if (clientsSaisis === "" || !Number.isInteger(clients) || clients < 0 || clients > 500) {
-    messageEl.textContent = "Tape le nombre de clients servis.";
-    return;
-  }
-  if (total > 0 && clients === 0) {
-    messageEl.textContent = "Tu as un total mais zero client : corrige le nombre de clients.";
+  if (clientsSaisis === "" || !Number.isInteger(clients) || clients < 1 || clients > 500) {
+    messageEl.textContent = "Tape le nombre de clients dont la mise est sur papier.";
     return;
   }
   const session = await lireObjet("session", "agent");
@@ -2051,7 +2038,7 @@ async function validerMonPapierInterne() {
     await chargerMonPapier();
     return;
   }
-  if (!confirm(`Papier du ${jourCourt(jour)} :\n\n${francsLisibles(total)} pour ${clients} client(s).\n\nUne fois valide, tu ne peux plus le changer. Valider ?`)) return;
+  if (!confirm(`Mises sur papier du ${jourCourt(jour)} (PAS dans le telephone) :\n\n${francsLisibles(total)} pour ${clients} client(s).\n\nCe total s'ajoute aux mises de ton telephone. Une fois valide, tu ne peux plus le changer. Valider ?`)) return;
   await stockerObjet("papiers_du_jour", {
     id_local: `papier:${session.code}:${jour}`,
     agent_id: session.code,
@@ -2283,7 +2270,7 @@ async function rafraichirListeAttente() {
     conteneur.innerHTML += `<div class="ligne-attente"><span>Erreur signalee ${x.numero_carnet ? `carnet ${echapper(x.numero_carnet)}` : ""} : ${echapper(x.description)}</span><span class="badge">a envoyer</span></div>`;
   });
   papiersDuJour.forEach(x => {
-    conteneur.innerHTML += `<div class="ligne-attente"><span>Mon papier du ${echapper(jourCourt(x.date_papier))} : ${echapper(francsLisibles(x.total_papier))}</span><span class="badge">a envoyer</span></div>`;
+    conteneur.innerHTML += `<div class="ligne-attente"><span>Mises sur papier du ${echapper(jourCourt(x.date_papier))} : ${echapper(francsLisibles(x.total_papier))}</span><span class="badge">a envoyer</span></div>`;
   });
   demandesCredit.forEach(d => {
     conteneur.innerHTML += `<div class="ligne-attente"><span>Demande credit carnet ${echapper(d.numero_carnet)}</span><span class="badge">en attente</span></div>`;
@@ -2406,7 +2393,7 @@ async function synchroniserInterne() {
     }
   }
 
-  for (const [magasin, table, libelle] of [["mises_supprimees", "mises_supprimees_mobile", "Mise supprimee"], ["signalements", "signalements_mobile", "Erreur signalee"], ["papiers_du_jour", "papier_du_jour_mobile", "Papier du jour"]]) {
+  for (const [magasin, table, libelle] of [["mises_supprimees", "mises_supprimees_mobile", "Mise supprimee"], ["signalements", "signalements_mobile", "Erreur signalee"], ["papiers_du_jour", "papier_du_jour_mobile", "Mises sur papier"]]) {
     const traces = (await listerObjets(magasin)).filter(x => !x.synchronise);
     for (const trace of traces) {
       const corps = { ...trace };
