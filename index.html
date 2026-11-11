@@ -340,7 +340,9 @@
     <div id="page-mon-papier" class="cache">
       <div class="carte">
         <h2>Mon papier du jour</h2>
-        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">A la fin de ta tournee, tape le total de ta fiche papier. Au bureau, il sera compare avec les mises de ton telephone et avec l'argent que tu rapportes. Le papier ne cree aucune mise.</p>
+        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Au moment de remettre les fonds, tape le total de ta fiche papier. Il est compare avec les mises de ton telephone et avec l'argent que tu remets. Le papier ne cree aucune mise.</p>
+        <label>Jour de la fiche *</label>
+        <input type="date" id="mp-date" onchange="chargerMonPapier()">
         <p id="mp-jour" style="font-size:15px; font-weight:600; margin-bottom:6px;"></p>
         <div id="mp-formulaire">
           <label>Total de ma fiche papier (F) *</label>
@@ -462,7 +464,7 @@
     <div id="page-plus" class="cache">
       <div class="carte">
         <h2>Autres operations</h2>
-        <button class="bouton-plus" onclick="allerA('mon-papier')">Mon papier du jour (fin de tournee)</button>
+        <button class="bouton-plus" onclick="allerA('mon-papier')">Mon papier du jour (a la remise des fonds)</button>
         <button class="bouton-plus" onclick="allerA('credit')">Demander un credit</button>
         <button class="bouton-plus" onclick="allerA('mes-demandes')">Mes demandes de credit</button>
         <button class="bouton-plus" onclick="allerA('gerer-carnet')">Gerer un carnet (+carnet, remplacement)</button>
@@ -484,7 +486,7 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.11.11-1";
+const VERSION_APP = "2026.11.11-2";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
@@ -1098,7 +1100,7 @@ function allerA(page) {
   if (page === "mise") rafraichirListeClientsLocaux();
   if (page === "mes-demandes") chargerMesDemandes();
   if (page === "mon-rapport") chargerMonRapport();
-  if (page === "mon-papier") chargerMonPapier();
+  if (page === "mon-papier") chargerMonPapier(true);
   if (page === "mes-retards") chargerMesRetards();
   if (page === "mes-penalites") chargerMesPenalites();
   if (page === "mes-clients") chargerMesClientsRecents();
@@ -1926,13 +1928,26 @@ async function chargerMonRapport() {
 }
 
 // ---- Mon papier du jour ---------------------------------------------------
-// A la fin de la tournee, l'agent tape le total de sa fiche papier. Le bureau le compare aux mises
-// du telephone et a l'argent rapporte. Le total du telephone n'est PAS montre avant la validation
+// Au moment de remettre les fonds, l'agent tape le total de sa fiche papier (une fiche par jour de
+// collecte : il choisit le jour). Le bureau le compare aux mises du telephone et a l'argent remis. Le total du telephone n'est PAS montre avant la validation
 // (sinon il suffirait de le recopier), et un papier valide ne se change plus depuis le telephone.
 const TOTAL_PAPIER_MAXIMUM = 5000000;
 
-function jourDuPapier() {
+const JOURS_PAPIER_EN_ARRIERE = 31;
+
+function aujourdhuiIso() {
   return maintenant().toISOString().split("T")[0];
+}
+
+// Le jour de la fiche choisi par l'agent (aujourd'hui par defaut ; jamais dans le futur).
+function jourDuPapier() {
+  const champ = document.getElementById("mp-date");
+  const aujourdhui = aujourdhuiIso();
+  const plusAncien = new Date(maintenant().getTime() - JOURS_PAPIER_EN_ARRIERE * 86400000).toISOString().split("T")[0];
+  champ.max = aujourdhui;
+  champ.min = plusAncien;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(champ.value) || champ.value > aujourdhui || champ.value < plusAncien) champ.value = aujourdhui;
+  return champ.value;
 }
 
 function francsLisibles(valeur) {
@@ -1970,7 +1985,8 @@ async function papierDejaValide(code, jour) {
   }
 }
 
-async function chargerMonPapier() {
+async function chargerMonPapier(remettreAujourdhui) {
+  if (remettreAujourdhui) document.getElementById("mp-date").value = aujourdhuiIso();
   const session = await lireObjet("session", "agent");
   const jour = jourDuPapier();
   const messageEl = document.getElementById("mp-message");
@@ -1992,18 +2008,18 @@ async function chargerMonPapier() {
   const ecart = Number(papier.total_papier) - telephone;
   let comparaison;
   if (ecart === 0) {
-    comparaison = `<p class="succes" style="font-size:14px;">Pareil que ton telephone. Tu peux aller au bureau.</p>`;
+    comparaison = `<p class="succes" style="font-size:14px;">Pareil que ton telephone.</p>`;
   } else if (ecart > 0) {
-    comparaison = `<p class="erreur" style="font-size:14px;"><b>ECART : ton papier a ${francsLisibles(ecart)} de plus que ton telephone.</b> Une mise oubliee sur le telephone ? Cherche-la sur ta fiche avant d'aller au bureau.</p>`;
+    comparaison = `<p class="erreur" style="font-size:14px;"><b>ECART : ton papier a ${francsLisibles(ecart)} de plus que ton telephone.</b> Une mise oubliee sur le telephone ? Cherche-la sur ta fiche avec la caisse.</p>`;
   } else {
-    comparaison = `<p class="erreur" style="font-size:14px;"><b>ECART : ton papier a ${francsLisibles(-ecart)} de moins que ton telephone.</b> Une mise tapee en trop ou un montant mal tape ? Cherche-la avant d'aller au bureau.</p>`;
+    comparaison = `<p class="erreur" style="font-size:14px;"><b>ECART : ton papier a ${francsLisibles(-ecart)} de moins que ton telephone.</b> Une mise tapee en trop ou un montant mal tape ? Cherche-la sur ta fiche avec la caisse.</p>`;
   }
   resultat.innerHTML = `
     <div class="ligne-attente"><span>Total de ma fiche papier</span><span><b>${echapper(francsLisibles(papier.total_papier))}</b></span></div>
     <div class="ligne-attente"><span>Clients servis</span><span><b>${echapper(papier.nombre_clients ?? "")}</b></span></div>
-    <div class="ligne-attente"><span>Mises de mon telephone aujourd'hui</span><span><b>${echapper(francsLisibles(telephone))}</b></span></div>
+    <div class="ligne-attente"><span>Mises de mon telephone ce jour-la</span><span><b>${echapper(francsLisibles(telephone))}</b></span></div>
     ${comparaison}
-    <p style="font-size:12px; color:#9B9CA1; margin-top:8px;">Papier valide${papier.synchronise ? " et envoye au bureau" : " : il partira au prochain envoi"}. Tu ne peux plus le changer : si le total est faux, dis-le au bureau.</p>`;
+    <p style="font-size:12px; color:#9B9CA1; margin-top:8px;">Papier valide${papier.synchronise ? " et envoye au bureau" : " : il partira au prochain envoi"}. Tu ne peux plus le changer : si le total est faux, dis-le a la caisse. Pense a « Synchroniser » pour que la caisse le voie.</p>`;
 }
 
 async function validerMonPapier() {
