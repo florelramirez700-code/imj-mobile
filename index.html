@@ -337,6 +337,24 @@
       </div>
     </div>
 
+    <div id="page-mon-papier" class="cache">
+      <div class="carte">
+        <h2>Mon papier du jour</h2>
+        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">A la fin de ta tournee, tape le total de ta fiche papier. Au bureau, il sera compare avec les mises de ton telephone et avec l'argent que tu rapportes. Le papier ne cree aucune mise.</p>
+        <p id="mp-jour" style="font-size:15px; font-weight:600; margin-bottom:6px;"></p>
+        <div id="mp-formulaire">
+          <label>Total de ma fiche papier (F) *</label>
+          <input type="number" id="mp-total" min="0" step="1" inputmode="numeric">
+          <label>Nombre de clients servis *</label>
+          <input type="number" id="mp-clients" min="0" step="1" inputmode="numeric">
+          <button onclick="validerMonPapier()">Valider mon papier</button>
+          <p style="font-size:12px; color:#9B9CA1; margin-top:8px;">Attention : une fois valide, tu ne peux plus le changer.</p>
+        </div>
+        <div id="mp-resultat" class="cache"></div>
+        <p id="mp-message"></p>
+      </div>
+    </div>
+
     <div id="page-gerer-carnet" class="cache">
       <div class="carte">
         <h2>Gerer un carnet</h2>
@@ -444,6 +462,7 @@
     <div id="page-plus" class="cache">
       <div class="carte">
         <h2>Autres operations</h2>
+        <button class="bouton-plus" onclick="allerA('mon-papier')">Mon papier du jour (fin de tournee)</button>
         <button class="bouton-plus" onclick="allerA('credit')">Demander un credit</button>
         <button class="bouton-plus" onclick="allerA('mes-demandes')">Mes demandes de credit</button>
         <button class="bouton-plus" onclick="allerA('gerer-carnet')">Gerer un carnet (+carnet, remplacement)</button>
@@ -465,12 +484,12 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.10.25-1";
+const VERSION_APP = "2026.11.11-1";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
 let db;
-const requeteDB = indexedDB.open("imj_mobile", 14);
+const requeteDB = indexedDB.open("imj_mobile", 15);
 requeteDB.onupgradeneeded = (e) => {
   db = e.target.result;
   if (!db.objectStoreNames.contains("session")) db.createObjectStore("session", { keyPath: "cle" });
@@ -488,6 +507,7 @@ requeteDB.onupgradeneeded = (e) => {
   if (!db.objectStoreNames.contains("copies_ecrans")) db.createObjectStore("copies_ecrans", { keyPath: "cle" });
   if (!db.objectStoreNames.contains("mises_supprimees")) db.createObjectStore("mises_supprimees", { keyPath: "id_local" });
   if (!db.objectStoreNames.contains("signalements")) db.createObjectStore("signalements", { keyPath: "id_local" });
+  if (!db.objectStoreNames.contains("papiers_du_jour")) db.createObjectStore("papiers_du_jour", { keyPath: "id_local" });
 };
 requeteDB.onsuccess = (e) => {
   db = e.target.result;
@@ -1059,7 +1079,7 @@ function afficherApp(session) {
   chargerListeCarnets().then(telechargerListeCarnets);
 }
 
-const TOUTES_LES_PAGES = ["nouveau-client", "mise", "credit", "mes-demandes", "mon-rapport", "gerer-carnet", "mes-penalites", "mes-clients", "fermeture", "mes-retards", "attente", "plus"];
+const TOUTES_LES_PAGES = ["nouveau-client", "mise", "credit", "mes-demandes", "mon-rapport", "gerer-carnet", "mes-penalites", "mes-clients", "fermeture", "mes-retards", "mon-papier", "attente", "plus"];
 // Onglet du bas a allumer pour chaque page (toutes les autres pages sont dans "Plus").
 const ONGLET_DE_LA_PAGE = { "mise": "mise", "nouveau-client": "client", "attente": "attente" };
 
@@ -1078,6 +1098,7 @@ function allerA(page) {
   if (page === "mise") rafraichirListeClientsLocaux();
   if (page === "mes-demandes") chargerMesDemandes();
   if (page === "mon-rapport") chargerMonRapport();
+  if (page === "mon-papier") chargerMonPapier();
   if (page === "mes-retards") chargerMesRetards();
   if (page === "mes-penalites") chargerMesPenalites();
   if (page === "mes-clients") chargerMesClientsRecents();
@@ -1904,6 +1925,133 @@ async function chargerMonRapport() {
   }
 }
 
+// ---- Mon papier du jour ---------------------------------------------------
+// A la fin de la tournee, l'agent tape le total de sa fiche papier. Le bureau le compare aux mises
+// du telephone et a l'argent rapporte. Le total du telephone n'est PAS montre avant la validation
+// (sinon il suffirait de le recopier), et un papier valide ne se change plus depuis le telephone.
+const TOTAL_PAPIER_MAXIMUM = 5000000;
+
+function jourDuPapier() {
+  return maintenant().toISOString().split("T")[0];
+}
+
+function francsLisibles(valeur) {
+  return String(Math.round(Number(valeur) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, " ") + " F";
+}
+
+// Ce que le telephone a compte aujourd'hui pour cet agent (mises envoyees ou encore en attente).
+async function totalTelephoneDuJour(code, jour) {
+  const mises = (await listerObjets("mises")).filter(m => m.agent_id === code && m.date_saisie === jour);
+  return mises.reduce((somme, m) => somme + (Number(m.montant_unitaire) || 0) * (Number(m.nombre_mise) || 1), 0);
+}
+
+// Le papier du jour : celui garde dans ce telephone, sinon celui deja recu par le bureau (autre telephone, appli reinstallee).
+async function papierDejaValide(code, jour) {
+  const idLocal = `papier:${code}:${jour}`;
+  const local = await lireObjet("papiers_du_jour", idLocal);
+  if (local || !navigator.onLine) return local;
+  try {
+    const reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/papier_du_jour_mobile?id_local=eq.${encodeURIComponent(idLocal)}`, {
+      headers: await enTetesAuth(),
+      cache: "no-store"
+    }, 8000);
+    if (!reponse.ok) return null;
+    const lignes = await reponse.json();
+    if (!lignes.length) return null;
+    const papier = {
+      id_local: idLocal, agent_id: code, date_papier: jour, total_papier: lignes[0].total_papier,
+      nombre_clients: lignes[0].nombre_clients, total_telephone: lignes[0].total_telephone,
+      saisi_le: lignes[0].saisi_le, synchronise: true
+    };
+    await stockerObjet("papiers_du_jour", papier);
+    return papier;
+  } catch (erreur) {
+    return null;
+  }
+}
+
+async function chargerMonPapier() {
+  const session = await lireObjet("session", "agent");
+  const jour = jourDuPapier();
+  const messageEl = document.getElementById("mp-message");
+  messageEl.className = "";
+  messageEl.textContent = "";
+  document.getElementById("mp-jour").textContent = `Papier du ${jourCourt(jour)}`;
+  const papier = await papierDejaValide(session.code, jour);
+  const formulaire = document.getElementById("mp-formulaire");
+  const resultat = document.getElementById("mp-resultat");
+  if (!papier) {
+    formulaire.className = "visible";
+    resultat.className = "cache";
+    resultat.innerHTML = "";
+    return;
+  }
+  formulaire.className = "cache";
+  resultat.className = "visible";
+  const telephone = await totalTelephoneDuJour(session.code, jour);
+  const ecart = Number(papier.total_papier) - telephone;
+  let comparaison;
+  if (ecart === 0) {
+    comparaison = `<p class="succes" style="font-size:14px;">Pareil que ton telephone. Tu peux aller au bureau.</p>`;
+  } else if (ecart > 0) {
+    comparaison = `<p class="erreur" style="font-size:14px;"><b>ECART : ton papier a ${francsLisibles(ecart)} de plus que ton telephone.</b> Une mise oubliee sur le telephone ? Cherche-la sur ta fiche avant d'aller au bureau.</p>`;
+  } else {
+    comparaison = `<p class="erreur" style="font-size:14px;"><b>ECART : ton papier a ${francsLisibles(-ecart)} de moins que ton telephone.</b> Une mise tapee en trop ou un montant mal tape ? Cherche-la avant d'aller au bureau.</p>`;
+  }
+  resultat.innerHTML = `
+    <div class="ligne-attente"><span>Total de ma fiche papier</span><span><b>${echapper(francsLisibles(papier.total_papier))}</b></span></div>
+    <div class="ligne-attente"><span>Clients servis</span><span><b>${echapper(papier.nombre_clients ?? "")}</b></span></div>
+    <div class="ligne-attente"><span>Mises de mon telephone aujourd'hui</span><span><b>${echapper(francsLisibles(telephone))}</b></span></div>
+    ${comparaison}
+    <p style="font-size:12px; color:#9B9CA1; margin-top:8px;">Papier valide${papier.synchronise ? " et envoye au bureau" : " : il partira au prochain envoi"}. Tu ne peux plus le changer : si le total est faux, dis-le au bureau.</p>`;
+}
+
+async function validerMonPapier() {
+  return unSeulALaFois("papier", validerMonPapierInterne);
+}
+
+async function validerMonPapierInterne() {
+  const messageEl = document.getElementById("mp-message");
+  messageEl.className = "erreur";
+  const totalSaisi = document.getElementById("mp-total").value.trim();
+  const clientsSaisis = document.getElementById("mp-clients").value.trim();
+  const total = Number(totalSaisi);
+  const clients = Number(clientsSaisis);
+  if (totalSaisi === "" || !Number.isInteger(total) || total < 0 || total > TOTAL_PAPIER_MAXIMUM) {
+    messageEl.textContent = "Tape le total de ta fiche papier (un nombre entier, sans virgule).";
+    return;
+  }
+  if (clientsSaisis === "" || !Number.isInteger(clients) || clients < 0 || clients > 500) {
+    messageEl.textContent = "Tape le nombre de clients servis.";
+    return;
+  }
+  if (total > 0 && clients === 0) {
+    messageEl.textContent = "Tu as un total mais zero client : corrige le nombre de clients.";
+    return;
+  }
+  const session = await lireObjet("session", "agent");
+  const jour = jourDuPapier();
+  if (await papierDejaValide(session.code, jour)) {
+    await chargerMonPapier();
+    return;
+  }
+  if (!confirm(`Papier du ${jourCourt(jour)} :\n\n${francsLisibles(total)} pour ${clients} client(s).\n\nUne fois valide, tu ne peux plus le changer. Valider ?`)) return;
+  await stockerObjet("papiers_du_jour", {
+    id_local: `papier:${session.code}:${jour}`,
+    agent_id: session.code,
+    date_papier: jour,
+    total_papier: total,
+    nombre_clients: clients,
+    total_telephone: await totalTelephoneDuJour(session.code, jour),
+    saisi_le: maintenant().toISOString(),
+    synchronise: false
+  });
+  document.getElementById("mp-total").value = "";
+  document.getElementById("mp-clients").value = "";
+  await chargerMonPapier();
+  await rafraichirListeAttente();
+}
+
 async function chargerMesRetards() {
   const conteneur = document.getElementById("liste-retards");
   const messageEl = document.getElementById("retards-message");
@@ -2038,7 +2186,7 @@ async function signalerErreurMise(idLocalMise, numeroCarnet, montantUnitaire, no
 
 // ---- Bandeau « a envoyer » : il apparait tout seul des qu'il y a Internet et des elements en attente.
 // Rien ne part sans que l'agent appuie : il peut d'abord verifier (et supprimer une erreur) dans « Attente ».
-const MAGASINS_A_ENVOYER = ["clients", "mises", "demandes_credit", "confirmations_remise", "fermetures_volontaires", "reprises_historiques", "rattrapages", "operations_carnet", "confirmations_penalite", "mises_supprimees", "signalements"];
+const MAGASINS_A_ENVOYER = ["clients", "mises", "demandes_credit", "confirmations_remise", "fermetures_volontaires", "reprises_historiques", "rattrapages", "operations_carnet", "confirmations_penalite", "mises_supprimees", "signalements", "papiers_du_jour"];
 let pageCourante = "mise";
 
 async function totalEnAttente() {
@@ -2089,11 +2237,12 @@ async function rafraichirListeAttente() {
   const confirmationsPenalite = (await listerObjets("confirmations_penalite")).filter(c => !c.synchronise);
   const misesSupprimees = (await listerObjets("mises_supprimees")).filter(x => !x.synchronise);
   const signalements = (await listerObjets("signalements")).filter(x => !x.synchronise);
+  const papiersDuJour = (await listerObjets("papiers_du_jour")).filter(x => !x.synchronise);
   const conteneur = document.getElementById("liste-attente");
   const rienEl = document.getElementById("rien-attente");
 
   conteneur.innerHTML = "";
-  const total = clients.length + photosEnRetard.length + mises.length + demandesCredit.length + confirmationsRemise.length + fermeturesVolontaires.length + reprisesHistoriques.length + rattrapages.length + operationsCarnet.length + confirmationsPenalite.length + misesSupprimees.length + signalements.length;
+  const total = clients.length + photosEnRetard.length + mises.length + demandesCredit.length + confirmationsRemise.length + fermeturesVolontaires.length + reprisesHistoriques.length + rattrapages.length + operationsCarnet.length + confirmationsPenalite.length + misesSupprimees.length + signalements.length + papiersDuJour.length;
   rienEl.style.display = total === 0 ? "block" : "none";
   const compteurEl = document.getElementById("nav-compteur-attente");
   compteurEl.textContent = total;
@@ -2116,6 +2265,9 @@ async function rafraichirListeAttente() {
   });
   signalements.forEach(x => {
     conteneur.innerHTML += `<div class="ligne-attente"><span>Erreur signalee ${x.numero_carnet ? `carnet ${echapper(x.numero_carnet)}` : ""} : ${echapper(x.description)}</span><span class="badge">a envoyer</span></div>`;
+  });
+  papiersDuJour.forEach(x => {
+    conteneur.innerHTML += `<div class="ligne-attente"><span>Mon papier du ${echapper(jourCourt(x.date_papier))} : ${echapper(francsLisibles(x.total_papier))}</span><span class="badge">a envoyer</span></div>`;
   });
   demandesCredit.forEach(d => {
     conteneur.innerHTML += `<div class="ligne-attente"><span>Demande credit carnet ${echapper(d.numero_carnet)}</span><span class="badge">en attente</span></div>`;
@@ -2238,7 +2390,7 @@ async function synchroniserInterne() {
     }
   }
 
-  for (const [magasin, table, libelle] of [["mises_supprimees", "mises_supprimees_mobile", "Mise supprimee"], ["signalements", "signalements_mobile", "Erreur signalee"]]) {
+  for (const [magasin, table, libelle] of [["mises_supprimees", "mises_supprimees_mobile", "Mise supprimee"], ["signalements", "signalements_mobile", "Erreur signalee"], ["papiers_du_jour", "papier_du_jour_mobile", "Papier du jour"]]) {
     const traces = (await listerObjets(magasin)).filter(x => !x.synchronise);
     for (const trace of traces) {
       const corps = { ...trace };
