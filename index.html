@@ -277,7 +277,11 @@
     <div id="page-credit" class="cache">
       <div class="carte">
         <h2>Demander un credit</h2>
-        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Indique le numero de carnet et le credit que le client veut. Le bureau verifie s'il y a droit : la reponse, avec la raison si c'est non, arrive dans « Mes demandes de credit ».</p>
+        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Indique le numero de carnet et le credit que le client veut, lis-lui les articles, photographie sa piece d'identite et fais-le signer. Le bureau verifie s'il y a droit : la reponse, avec la raison si c'est non, arrive dans « Mes demandes de credit ».</p>
+        <div id="cr-a-signer" class="cache" style="background:#FFF4DE; border-radius:8px; padding:10px; margin-bottom:8px; font-size:14px;">
+          <span id="cr-a-signer-texte"></span>
+          <button type="button" class="secondaire" style="margin-top:8px;" onclick="annulerSignatureDemandeBureau()">Ce n'est pas cette demande : revenir a une demande normale</button>
+        </div>
         <label>Numero de carnet *</label>
         <input type="number" id="cr-carnet" inputmode="numeric">
           <p id="cr-carnet-info" style="font-size:14px; font-weight:600; margin:6px 0 2px;"></p>
@@ -291,7 +295,47 @@
         </select>
         <label>Commentaire (optionnel)</label>
         <input type="text" id="cr-commentaire" placeholder="Ex: pour son commerce">
-        <button onclick="enregistrerDemandeCredit()">Envoyer la demande</button>
+
+        <label style="margin-top:16px; font-weight:600; color:#0548B3;">Piece d'identite du client</label>
+        <div id="cr-piece-connue" class="cache" style="font-size:14px;">
+          <p style="margin:4px 0;">Le bureau a deja la piece d'identite de ce client.</p>
+          <label style="display:flex; gap:8px; align-items:center;"><input type="checkbox" id="cr-piece-changee" style="width:auto;" onchange="majBlocPiece()"> La carte a change ou a expire : reprendre la photo</label>
+        </div>
+        <div id="cr-piece-champs">
+          <label>Type de piece *</label>
+          <select id="cr-type-piece">
+            <option value="">-- Choisir --</option>
+            <option value="CNI">Carte nationale d'identite (CNI)</option>
+            <option value="Carte d'electeur">Carte d'electeur</option>
+            <option value="Passeport">Passeport</option>
+            <option value="Permis de conduire">Permis de conduire</option>
+            <option value="Autre piece">Autre piece</option>
+          </select>
+          <label>Numero de la piece *</label>
+          <input type="text" id="cr-numero-piece" autocomplete="off">
+          <p style="font-size:12px; color:#4A4A4A; margin:6px 0;">Toute la carte dans la photo, bien nette, sans reflet : on doit pouvoir lire le numero. Sinon, reprends la photo.</p>
+          <input type="file" accept="image/*" capture="environment" id="cr-recto" style="display:none;">
+          <input type="file" accept="image/*" capture="environment" id="cr-verso" style="display:none;">
+          <div style="display:flex; gap:10px;">
+            <button type="button" class="secondaire" style="width:auto; flex:1;" onclick="document.getElementById('cr-recto').click()">Photo du recto *</button>
+            <button type="button" class="secondaire" style="width:auto; flex:1;" onclick="document.getElementById('cr-verso').click()">Photo du verso *</button>
+          </div>
+          <div style="display:flex; gap:10px; margin-top:6px;">
+            <img id="cr-recto-apercu" alt="" style="display:none; width:48%; border-radius:6px; border:1px solid #CED4DA;">
+            <img id="cr-verso-apercu" alt="" style="display:none; width:48%; border-radius:6px; border:1px solid #CED4DA;">
+          </div>
+        </div>
+
+        <label style="margin-top:16px; font-weight:600; color:#0548B3;">Articles a lire au client</label>
+        <div id="cr-articles" style="font-size:14px; line-height:1.45; background:#F5F7FA; border-radius:8px; padding:10px;"></div>
+        <label style="display:flex; gap:8px; align-items:center; font-size:14px;"><input type="checkbox" id="cr-articles-lus" style="width:auto;" onchange="majSignatureActive()"> J'ai lu ces articles au client et il les a compris.</label>
+
+        <label style="margin-top:16px; font-weight:600; color:#0548B3;">Signature du client</label>
+        <p id="cr-signature-aide" style="font-size:12px; color:#4A4A4A; margin:4px 0;">Coche d'abord la case des articles. Ensuite le client signe avec son doigt dans le cadre.</p>
+        <canvas id="cr-signature" style="width:100%; height:180px; background:#FFFFFF; border:2px dashed #9B9CA1; border-radius:8px; touch-action:none; opacity:0.4;"></canvas>
+        <button type="button" class="secondaire" style="margin-top:6px;" onclick="effacerSignature()">Effacer la signature</button>
+
+        <button onclick="enregistrerDemandeCredit()" style="margin-top:14px;">Envoyer la demande signee</button>
         <p id="cr-message"></p>
       </div>
     </div>
@@ -301,6 +345,10 @@
         <h2>Mes demandes de credit</h2>
         <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Avec internet : statuts a jour. Sans reseau : la derniere copie gardee dans le telephone.</p>
         <button onclick="chargerMesDemandes()">Actualiser</button>
+        <h3 style="margin-top:18px;">Demandes a faire signer</h3>
+        <p style="font-size:12px; color:#9B9CA1; margin:4px 0;">Proposees par le bureau pour tes clients. Le bureau ne les accorde qu'avec la signature du client.</p>
+        <div id="liste-a-signer" style="margin-top:8px;"></div>
+        <p id="a-signer-message"></p>
         <h3 style="margin-top:18px;">Credits a remettre au client</h3>
         <div id="liste-credits-a-remettre" style="margin-top:8px;"></div>
         <p id="credits-a-remettre-message"></p>
@@ -486,7 +534,7 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.11.11-3";
+const VERSION_APP = "2026.11.17-1";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
@@ -706,10 +754,17 @@ async function telechargerListeCarnets() {
     // Avec la position du carnet (cases, page, derniere mise) et ce qu'il faut pour bloquer une mise
     // (derniere page, credit en cours, fin de la page). Tant que le bureau n'a pas ajoute ces colonnes
     // sur le serveur, la demande est refusee : on redemande avec moins de colonnes.
-    let reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/carnets_mobile?select=numero_carnet,code_agent,nom_client,type_carnet,mise,cases,total_verse,page_du,page_ouverte,derniere_mise,derniere_page,credit_en_cours,fin_page,updated_at`, {
+    // piece_connue : le bureau a deja la piece d'identite du client (demande de credit signee, 17/11/2026).
+    let reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/carnets_mobile?select=numero_carnet,code_agent,nom_client,type_carnet,mise,cases,total_verse,page_du,page_ouverte,derniere_mise,derniere_page,credit_en_cours,fin_page,piece_connue,updated_at`, {
       headers: await enTetesAuth(),
       cache: "no-store"
     }, 15000);
+    if (!reponse.ok && reponse.status === 400) {
+      reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/carnets_mobile?select=numero_carnet,code_agent,nom_client,type_carnet,mise,cases,total_verse,page_du,page_ouverte,derniere_mise,derniere_page,credit_en_cours,fin_page,updated_at`, {
+        headers: await enTetesAuth(),
+        cache: "no-store"
+      }, 15000);
+    }
     if (!reponse.ok && reponse.status === 400) {
       reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/carnets_mobile?select=numero_carnet,code_agent,nom_client,type_carnet,mise,cases,total_verse,page_du,page_ouverte,derniere_mise,updated_at`, {
         headers: await enTetesAuth(),
@@ -1099,6 +1154,7 @@ function allerA(page) {
   if (page === "attente") { document.getElementById("sync-message").textContent = ""; rafraichirListeAttente(); chargerHistoriqueMises(); }
   if (page === "mise") rafraichirListeClientsLocaux();
   if (page === "mes-demandes") chargerMesDemandes();
+  if (page === "credit") preparerEcranCredit();
   if (page === "mon-rapport") chargerMonRapport();
   if (page === "mon-papier") chargerMonPapier(true);
   if (page === "mes-retards") chargerMesRetards();
@@ -1430,6 +1486,257 @@ async function enregistrerDemandeCredit() {
   return unSeulALaFois("demande-credit", enregistrerDemandeCreditInterne);
 }
 
+// ---- Demande de credit signee sur le terrain (17/11/2026) ----------------------------------
+// L'agent lit les articles au client, le client signe au doigt, l'agent photographie sa piece
+// d'identite (une seule fois par client : le bureau dit s'il l'a deja). Tout reste dans le
+// telephone et part a la synchronisation : les images dans le stockage prive "demandes_credit",
+// puis la demande.
+
+// Les memes articles que la demande papier et que le document imprime au bureau
+// (IMJ Core, documents_terrain.articles_demande_credit) : changer les deux ensemble.
+const ARTICLES_DEMANDE_CREDIT = [
+  "Article 1 - Le demandeur déclare que les informations fournies ci-dessus sont exactes et sincères.",
+  "Article 2 - Le demandeur n'indique pas un montant : le crédit est calculé par IMJ CORE à partir de la mise de référence du carnet, selon les formules en vigueur pour le type de crédit choisi.",
+  "Article 3 - Le demandeur s'engage à rembourser le crédit accordé selon l'échéance qui lui sera communiquée, par voie de cotisation régulière sur son carnet.",
+  "Article 4 - Tout retard de remboursement au-delà de l'échéance entraîne l'application d'une pénalité, calculée selon le barème en vigueur pour le type de crédit concerné.",
+  "Article 5 - En cas de pénalité impayée, aucun nouveau crédit ne pourra être accordé au demandeur jusqu'à règlement complet.",
+  "Article 6 - La présente demande ne constitue pas un engagement de la part d'IMJ à accorder le crédit -- elle reste soumise à vérification d'éligibilité (ancienneté, régularité, position du carnet).",
+  "Article 7 - Crédit X3 (crédit sur compte) : il est réservé au client qui a un compte épargne ouvert depuis au moins 3 mois, avec dessus au moins l'équivalent de 30 mises de son carnet. Le carnet et ce compte sont donnés en garantie : aucun retrait n'y est possible avant le remboursement complet du crédit.",
+];
+
+// Photo de la piece : plus grande que celle du client, pour que le numero reste lisible.
+const PIECE_COTE_MAX = 1600;
+const PIECE_QUALITE = 0.85;
+
+let demandeBureauASigner = null;   // demande proposee par le bureau, en cours de signature
+let photoPieceRecto = null;
+let photoPieceVerso = null;
+let signatureTracee = false;
+
+function reduirePhotoPiece(base64DataUrl) {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => {
+      try {
+        const echelle = Math.min(1, PIECE_COTE_MAX / Math.max(image.width, image.height));
+        const toile = document.createElement("canvas");
+        toile.width = Math.max(1, Math.round(image.width * echelle));
+        toile.height = Math.max(1, Math.round(image.height * echelle));
+        toile.getContext("2d").drawImage(image, 0, 0, toile.width, toile.height);
+        const reduite = toile.toDataURL("image/jpeg", PIECE_QUALITE);
+        resolve(reduite && reduite.startsWith("data:image/jpeg") ? reduite : base64DataUrl);
+      } catch (e) {
+        resolve(base64DataUrl);
+      }
+    };
+    image.onerror = () => resolve(base64DataUrl);
+    image.src = base64DataUrl;
+  });
+}
+
+async function prendrePhotoPiece(cote, fichier) {
+  if (!fichier) return;
+  const photo = await reduirePhotoPiece(await fichierVersBase64(fichier));
+  if (cote === "recto") photoPieceRecto = photo; else photoPieceVerso = photo;
+  const apercu = document.getElementById(`cr-${cote}-apercu`);
+  apercu.src = photo;
+  apercu.style.display = "block";
+}
+
+document.getElementById("cr-recto").addEventListener("change", (e) => prendrePhotoPiece("recto", e.target.files[0]));
+document.getElementById("cr-verso").addEventListener("change", (e) => prendrePhotoPiece("verso", e.target.files[0]));
+document.getElementById("cr-carnet").addEventListener("input", () => majBlocPiece());
+
+// Le bureau a-t-il deja la piece de ce client ?
+function pieceDejaAuBureau(numero) {
+  if (demandeBureauASigner && Number(demandeBureauASigner.numero_carnet) === Number(numero)) {
+    if (demandeBureauASigner.piece_connue) return true;
+  }
+  const carnet = carnetsConnus.get(Number(numero));
+  return !!(carnet && carnet.piece_connue);
+}
+
+function pieceADemander() {
+  const numero = parseInt(document.getElementById("cr-carnet").value);
+  if (!numero || !pieceDejaAuBureau(numero)) return true;
+  return document.getElementById("cr-piece-changee").checked;
+}
+
+function majBlocPiece() {
+  const numero = parseInt(document.getElementById("cr-carnet").value);
+  const connue = !!numero && pieceDejaAuBureau(numero);
+  document.getElementById("cr-piece-connue").className = connue ? "" : "cache";
+  if (!connue) document.getElementById("cr-piece-changee").checked = false;
+  document.getElementById("cr-piece-champs").className = pieceADemander() ? "" : "cache";
+}
+
+// ---- Signature au doigt ----
+function majSignatureActive() {
+  const active = document.getElementById("cr-articles-lus").checked;
+  const toile = document.getElementById("cr-signature");
+  toile.style.opacity = active ? "1" : "0.4";
+  toile.style.borderColor = active ? "#0548B3" : "#9B9CA1";
+  document.getElementById("cr-signature-aide").textContent = active
+    ? "Le client signe avec son doigt dans le cadre."
+    : "Coche d'abord la case des articles. Ensuite le client signe avec son doigt dans le cadre.";
+}
+
+function preparerToileSignature() {
+  const toile = document.getElementById("cr-signature");
+  const largeur = toile.clientWidth;
+  if (!largeur) return;
+  // La toile garde sa taille tant qu'il y a une signature (tourner le telephone ne l'efface pas).
+  if (signatureTracee && toile.width) return;
+  toile.width = largeur;
+  toile.height = toile.clientHeight || 180;
+  const ctx = toile.getContext("2d");
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, 0, toile.width, toile.height);
+}
+
+function effacerSignature() {
+  signatureTracee = false;
+  const toile = document.getElementById("cr-signature");
+  toile.width = 0;
+  preparerToileSignature();
+}
+
+(function brancherSignature() {
+  const toile = document.getElementById("cr-signature");
+  let dernier = null;
+  const point = (e) => {
+    const cadre = toile.getBoundingClientRect();
+    return { x: (e.clientX - cadre.left) * (toile.width / cadre.width), y: (e.clientY - cadre.top) * (toile.height / cadre.height) };
+  };
+  toile.addEventListener("pointerdown", (e) => {
+    if (!document.getElementById("cr-articles-lus").checked) {
+      alert("Lis d'abord les articles au client, puis coche la case « J'ai lu ces articles au client ».");
+      return;
+    }
+    if (!toile.width) preparerToileSignature();
+    e.preventDefault();
+    toile.setPointerCapture(e.pointerId);
+    dernier = point(e);
+  });
+  toile.addEventListener("pointermove", (e) => {
+    if (!dernier) return;
+    e.preventDefault();
+    const p = point(e);
+    const ctx = toile.getContext("2d");
+    ctx.strokeStyle = "#000000";
+    ctx.lineWidth = 3;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(dernier.x, dernier.y);
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+    dernier = p;
+    signatureTracee = true;
+  });
+  const fin = () => { dernier = null; };
+  toile.addEventListener("pointerup", fin);
+  toile.addEventListener("pointercancel", fin);
+  toile.addEventListener("pointerleave", fin);
+})();
+
+function preparerEcranCredit() {
+  document.getElementById("cr-articles").innerHTML = ARTICLES_DEMANDE_CREDIT.map(a => `<p style="margin:0 0 6px;">${echapper(a)}</p>`).join("");
+  preparerToileSignature();
+  majSignatureActive();
+  majBlocPiece();
+}
+
+// ---- Demandes proposees par le bureau, a faire signer ----
+async function demandesDejaSigneesIci() {
+  const demandes = await listerObjets("demandes_credit");
+  return new Set(demandes.filter(d => d.demande_core_id).map(d => Number(d.demande_core_id)));
+}
+
+async function chargerDemandesASigner() {
+  const conteneur = document.getElementById("liste-a-signer");
+  const messageEl = document.getElementById("a-signer-message");
+  messageEl.className = "";
+  conteneur.innerHTML = "";
+  const session = await lireObjet("session", "agent");
+  try {
+    const { donnees, dateCopie } = await lireAvecCopie("a_signer", `demandes_a_signer_mobile?code_agent=eq.${encodeURIComponent(session.code)}&order=demande_id.asc`);
+    const dejaSignees = await demandesDejaSigneesIci();
+    const restantes = donnees.filter(d => !dejaSignees.has(Number(d.demande_id)));
+    if (!restantes.length) {
+      messageEl.textContent = "Aucune demande a faire signer." + mentionCopie(dateCopie);
+      return;
+    }
+    messageEl.textContent = mentionCopie(dateCopie).trim();
+    let html = "";
+    restantes.forEach(d => {
+      html += `
+        <div class="ligne-attente" style="flex-direction:column; align-items:flex-start;">
+          <div style="display:flex; justify-content:space-between; width:100%;">
+            <span><b>Carnet ${echapper(d.numero_carnet)}</b> - ${echapper(d.nom_client)}</span>
+            <span class="badge">${echapper(d.type_produit)}</span>
+          </div>
+          <span style="font-size:13px; margin-top:4px;">Mise de reference : ${echapper(d.mise)} F -- demande n° ${echapper(d.demande_id)}</span>
+          <button style="margin-top:8px;" onclick="ouvrirSignatureDemandeBureau(${Number(d.demande_id)})">Faire signer le client</button>
+        </div>`;
+    });
+    conteneur.innerHTML = html;
+    listeASigner = restantes;
+  } catch (erreur) {
+    messageEl.textContent = "Liste des demandes a faire signer pas disponible pour l'instant.";
+  }
+}
+
+let listeASigner = [];
+
+function ouvrirSignatureDemandeBureau(demandeId) {
+  const d = listeASigner.find(x => Number(x.demande_id) === Number(demandeId));
+  if (!d) return;
+  reinitialiserEcranCredit();
+  demandeBureauASigner = d;
+  allerA("credit");
+  document.getElementById("cr-carnet").value = d.numero_carnet;
+  document.getElementById("cr-carnet").readOnly = true;
+  afficherNomDuCarnet("cr-carnet");
+  const choix = document.getElementById("cr-type");
+  choix.value = d.type_produit;
+  choix.disabled = true;
+  document.getElementById("cr-a-signer-texte").textContent =
+    `Demande n° ${d.demande_id} proposee par le bureau : credit ${d.type_produit} pour ${d.nom_client}. Lis les articles au client et fais-le signer s'il veut ce credit.`;
+  document.getElementById("cr-a-signer").className = "";
+  majBlocPiece();
+}
+
+function annulerSignatureDemandeBureau() {
+  reinitialiserEcranCredit();
+  preparerEcranCredit();
+}
+
+function reinitialiserEcranCredit() {
+  demandeBureauASigner = null;
+  document.getElementById("cr-a-signer").className = "cache";
+  const champCarnet = document.getElementById("cr-carnet");
+  champCarnet.value = "";
+  champCarnet.readOnly = false;
+  afficherNomDuCarnet("cr-carnet");
+  const choix = document.getElementById("cr-type");
+  choix.value = "";
+  choix.disabled = false;
+  document.getElementById("cr-commentaire").value = "";
+  document.getElementById("cr-type-piece").value = "";
+  document.getElementById("cr-numero-piece").value = "";
+  document.getElementById("cr-piece-changee").checked = false;
+  document.getElementById("cr-recto").value = "";
+  document.getElementById("cr-verso").value = "";
+  photoPieceRecto = null;
+  photoPieceVerso = null;
+  ["recto", "verso"].forEach(c => { const a = document.getElementById(`cr-${c}-apercu`); a.removeAttribute("src"); a.style.display = "none"; });
+  document.getElementById("cr-articles-lus").checked = false;
+  effacerSignature();
+  majSignatureActive();
+  majBlocPiece();
+}
+
 async function enregistrerDemandeCreditInterne() {
   const carnet = parseInt(document.getElementById("cr-carnet").value);
   const messageEl = document.getElementById("cr-message");
@@ -1444,11 +1751,33 @@ async function enregistrerDemandeCreditInterne() {
     messageEl.textContent = "Choisis le credit que le client demande.";
     return;
   }
+  const avecPiece = pieceADemander();
+  const typePiece = document.getElementById("cr-type-piece").value;
+  const numeroPiece = document.getElementById("cr-numero-piece").value.trim();
+  if (avecPiece) {
+    if (!typePiece) { messageEl.textContent = "Choisis le type de piece d'identite du client."; return; }
+    if (numeroPiece.replace(/\s/g, "").length < 4) { messageEl.textContent = "Tape le numero de la piece d'identite du client."; return; }
+    if (!photoPieceRecto || !photoPieceVerso) { messageEl.textContent = "Prends la photo du recto ET du verso de la piece d'identite."; return; }
+  }
+  if (!document.getElementById("cr-articles-lus").checked) {
+    messageEl.textContent = "Lis les articles au client et coche la case « J'ai lu ces articles au client ».";
+    return;
+  }
+  if (!signatureTracee) {
+    messageEl.textContent = "Le client doit signer dans le cadre.";
+    return;
+  }
+  if (!demandeBureauASigner && !numeroCarnetAccepte(carnet)) return;
+  if (demandeBureauASigner && (await demandesDejaSigneesIci()).has(Number(demandeBureauASigner.demande_id))) {
+    messageEl.textContent = "Cette demande est deja signee sur ce telephone.";
+    return;
+  }
 
   const session = await lireObjet("session", "agent");
   const idLocal = genererUUID();
   // Le type choisi part en tete du commentaire : le bureau le lit la pour creer la bonne demande.
   const commentaireLibre = document.getElementById("cr-commentaire").value.trim();
+  const signatureBase64 = document.getElementById("cr-signature").toDataURL("image/png");
 
   const demande = {
     id_local: idLocal,
@@ -1458,18 +1787,57 @@ async function enregistrerDemandeCreditInterne() {
     date_demande: maintenant().toISOString().split("T")[0],
     created_at: maintenant().toISOString(),
     statut_traitement: "en_attente",
+    demande_core_id: demandeBureauASigner ? Number(demandeBureauASigner.demande_id) : null,
+    articles_lus: true,
+    signe_le: maintenant().toISOString(),
+    signature_base64: signatureBase64,
+    signature_url: null,
+    type_piece: avecPiece ? typePiece : null,
+    numero_piece: avecPiece ? numeroPiece : null,
+    piece_recto_base64: avecPiece ? photoPieceRecto : null,
+    piece_verso_base64: avecPiece ? photoPieceVerso : null,
+    piece_recto_url: null,
+    piece_verso_url: null,
     synchronise: false
   };
 
   await stockerObjet("demandes_credit", demande);
 
+  reinitialiserEcranCredit();
   messageEl.className = "succes";
-  messageEl.textContent = "Demande enregistree localement. Sera envoyee a la prochaine synchronisation.";
-  document.getElementById("cr-carnet").value = "";
-  afficherNomDuCarnet("cr-carnet");
-  document.getElementById("cr-commentaire").value = "";
-  document.getElementById("cr-type").value = "";
+  messageEl.textContent = "Demande signee enregistree dans le telephone. Elle partira au bureau a la prochaine synchronisation.";
   rafraichirListeAttente();
+}
+
+// ---- Envoi des images ----
+async function televerserDansStockage(seau, chemin, blob) {
+  const url = `${SUPABASE_URL}/storage/v1/object/${seau}/${chemin}`;
+  const reponse = await fetchAvecDelai(url, {
+    method: "POST",
+    headers: { ...(await enTetesAuth()), "Content-Type": blob.type || "image/jpeg" },
+    body: blob
+  }, 60000);
+  if (!reponse.ok) {
+    const texteErreur = await reponse.text();
+    // Deja au bureau (un envoi precedent a reussi mais la reponse s'est perdue) : c'est bon.
+    const dejaEnvoyee = reponse.status === 409 || /duplicate|already exists/i.test(texteErreur);
+    if (!dejaEnvoyee) throw new Error(`${reponse.status} -- ${texteErreur.slice(0, 150)}`);
+  }
+  return `${SUPABASE_URL}/storage/v1/object/${seau}/${chemin}`;
+}
+
+// La signature et la piece d'une demande, dans le dossier de l'agent. Chaque image envoyee est
+// retiree du telephone aussitot : si la suite echoue, elle ne repart pas une 2e fois.
+async function envoyerImagesDemande(demande) {
+  const images = [["signature", "png"], ["piece_recto", "jpg"], ["piece_verso", "jpg"]];
+  for (const [nom, extension] of images) {
+    const base64 = demande[`${nom}_base64`];
+    if (!base64 || demande[`${nom}_url`]) continue;
+    const suffixe = nom.replace("piece_", "");
+    demande[`${nom}_url`] = await televerserDansStockage("demandes_credit", `${demande.agent_id}/${demande.id_local}_${suffixe}.${extension}`, base64VersBlob(base64));
+    demande[`${nom}_base64`] = null;
+    await stockerObjet("demandes_credit", demande);
+  }
 }
 
 // Credits deja confirmes sur ce telephone (envoyes ou en attente d'envoi) : on ne propose pas deux fois le bouton.
@@ -1525,6 +1893,7 @@ async function confirmerRemiseCredit(creditId, montant, interet) {
 }
 
 async function chargerMesDemandes() {
+  await chargerDemandesASigner();
   await chargerCreditsARemettre();
   const conteneur = document.getElementById("liste-mes-demandes");
   const messageEl = document.getElementById("demandes-message");
@@ -2273,7 +2642,8 @@ async function rafraichirListeAttente() {
     conteneur.innerHTML += `<div class="ligne-attente"><span>Mises sur papier du ${echapper(jourCourt(x.date_papier))} : ${echapper(francsLisibles(x.total_papier))}</span><span class="badge">a envoyer</span></div>`;
   });
   demandesCredit.forEach(d => {
-    conteneur.innerHTML += `<div class="ligne-attente"><span>Demande credit carnet ${echapper(d.numero_carnet)}</span><span class="badge">en attente</span></div>`;
+    const detail = d.signature_base64 || d.signature_url ? ((d.piece_recto_base64 || d.piece_recto_url) ? " (signee, avec la piece)" : " (signee)") : "";
+    conteneur.innerHTML += `<div class="ligne-attente"><span>Demande credit carnet ${echapper(d.numero_carnet)}${detail}</span><span class="badge">en attente</span></div>`;
   });
   confirmationsRemise.forEach(c => {
     conteneur.innerHTML += `<div class="ligne-attente"><span>Confirmation remise credit #${echapper(c.credit_id)}</span><span class="badge">en attente</span></div>`;
@@ -2422,8 +2792,19 @@ async function synchroniserInterne() {
 
   const demandesCredit = (await listerObjets("demandes_credit")).filter(d => !d.synchronise);
   for (const demande of demandesCredit) {
+    // La signature et la piece d'abord : le bureau n'accepte pas une demande signee sans elles.
+    try {
+      await envoyerImagesDemande(demande);
+    } catch (e) {
+      detailsErreurs.push(`Demande credit (carnet ${demande.numero_carnet}) : signature ou piece pas envoyee -- ${e.message}`);
+      echecs++;
+      continue;
+    }
     const corps = { ...demande };
     delete corps.synchronise;
+    delete corps.signature_base64;
+    delete corps.piece_recto_base64;
+    delete corps.piece_verso_base64;
     try {
       const reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/demandes_credit_mobile?on_conflict=id_local`, {
         method: "POST",
