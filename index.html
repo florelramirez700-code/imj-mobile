@@ -538,7 +538,7 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.11.18-2";
+const VERSION_APP = "2026.11.18-3";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
@@ -707,6 +707,15 @@ async function hacherMotDePasse(motDePasse) {
   const donnees = new TextEncoder().encode(motDePasse);
   const hachage = await crypto.subtle.digest("SHA-256", donnees);
   return Array.from(new Uint8Array(hachage)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+function viderMagasin(magasin) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(magasin, "readwrite");
+    tx.objectStore(magasin).clear();
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
 function stockerObjet(magasin, objet) {
@@ -1063,6 +1072,60 @@ async function verifierSessionExistante() {
   }
 }
 
+// ---- Telephone perdu ou vole (18/11/2026) ----------------------------------------
+// Le bureau declare le telephone perdu ou vole (IMJ Core, « Telephones des agents ») : le mot de
+// passe de l'agent change, et ce telephone, s'il a Internet, efface TOUT ce qu'il garde. Il
+// demande au serveur « ai-je ete declare perdu apres ma connexion ? » (heure de connexion lue dans
+// le jeton : champ amr). Le nouveau telephone, connecte apres la declaration, n'est pas touche.
+function heureDeConnexion(session) {
+  try {
+    const partie = session.access_token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const amr = JSON.parse(atob(partie)).amr;
+    const secondes = Array.isArray(amr) ? Math.min(...amr.map(a => Number(a.timestamp)).filter(Boolean)) : NaN;
+    if (Number.isFinite(secondes)) return new Date(secondes * 1000).toISOString();
+  } catch (erreur) { /* jeton illisible */ }
+  return session.connecte_le || null;
+}
+
+async function verifierTelephoneAnnule() {
+  if (!navigator.onLine) return false;
+  const session = await lireObjet("session", "agent");
+  const connecteLe = session ? heureDeConnexion(session) : null;
+  if (!session || !connecteLe) return false;
+  try {
+    const reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/rpc/telephone_annule`, {
+      method: "POST",
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ code: session.code, connecte_le: connecteLe }),
+    }, 8000);
+    if (!reponse.ok) return false;   // fonction pas encore creee sur le serveur, ou panne : rien ne change
+    if ((await reponse.json()) !== true) return false;
+  } catch (erreur) {
+    return false;
+  }
+  await effacerToutLeTelephone();
+  return true;
+}
+
+async function effacerToutLeTelephone() {
+  try { sessionStorage.setItem("imj_telephone_annule", "1"); } catch (erreur) { /* sans stockage : pas de message */ }
+  try { db.close(); } catch (erreur) { /* deja fermee */ }
+  await new Promise((resolve) => {
+    const requete = indexedDB.deleteDatabase("imj_mobile");
+    requete.onsuccess = requete.onerror = requete.onblocked = () => resolve();
+  });
+  location.reload();
+}
+
+function afficherMessageTelephoneAnnule() {
+  let annule = false;
+  try { annule = sessionStorage.getItem("imj_telephone_annule") === "1"; sessionStorage.removeItem("imj_telephone_annule"); } catch (erreur) { annule = false; }
+  if (annule) {
+    document.getElementById("login-message").textContent =
+      "Ce telephone a ete declare perdu ou vole au bureau : tout ce qu'il gardait a ete efface. Pour travailler, connecte-toi avec le nouveau mot de passe donne par le bureau.";
+  }
+}
+
 async function obtenirTokenValide() {
   const session = await lireObjet("session", "agent");
   if (!session || !session.access_token) return null;
@@ -1145,6 +1208,7 @@ async function seConnecter() {
       access_token: donnees.access_token,
       refresh_token: donnees.refresh_token,
       expires_at: Date.now() + donnees.expires_in * 1000,
+      connecte_le: new Date(Date.now() + (ecartHorlogeDuJeton(donnees.access_token) || 0)).toISOString(),
     };
     mesurerHorloge(session);
     await stockerObjet("session", session);
@@ -1180,7 +1244,10 @@ function afficherApp(session) {
   rafraichirListeAttente();
   rafraichirListeClientsLocaux();
   chargerListeCarnets().then(telechargerListeCarnets);
+  verifierTelephoneAnnule();
 }
+
+window.addEventListener("online", () => { if (codeAgentConnecte) verifierTelephoneAnnule(); });
 
 const TOUTES_LES_PAGES = ["nouveau-client", "mise", "credit", "mes-demandes", "mon-rapport", "gerer-carnet", "mes-penalites", "mes-clients", "fermeture", "mes-retards", "mon-papier", "attente", "plus"];
 // Onglet du bas a allumer pour chaque page (toutes les autres pages sont dans "Plus").
@@ -2027,6 +2094,10 @@ async function telechargerClientsRecherche() {
     }, 20000);
     if (!reponse.ok) return;
     const tousLesClients = await reponse.json();
+    if (!Array.isArray(tousLesClients)) return;
+    // La copie est remplacee, pas completee : depuis le 18/11/2026 chaque agent ne recoit que ses
+    // clients (et ceux qu'il remplace en ce moment). Les autres sortent du telephone.
+    await viderMagasin("clients_cache");
     for (const client of tousLesClients) {
       if (client.telephone) await stockerObjet("clients_cache", client);
     }
@@ -2918,6 +2989,7 @@ async function synchroniserInterne() {
   const messageEl = document.getElementById("sync-message");
   messageEl.className = "";
   messageEl.textContent = "Synchronisation en cours...";
+  if (await verifierTelephoneAnnule()) return;
   const sessionEnvoi = await lireObjet("session", "agent");
   codeEnvoi = sessionEnvoi ? sessionEnvoi.code : null;
 
@@ -3256,6 +3328,7 @@ async function viderVieillesMises() {
   }
 }
 
+afficherMessageTelephoneAnnule();
 document.getElementById("version-affichee-connexion").textContent = VERSION_APP;
 document.getElementById("version-affichee").textContent = VERSION_APP;
 
