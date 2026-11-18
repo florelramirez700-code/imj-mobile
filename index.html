@@ -538,7 +538,7 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.11.18-1";
+const VERSION_APP = "2026.11.18-2";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
@@ -653,8 +653,50 @@ function echapper(valeur) {
 
 // Empreinte du mot de passe pour la reconnexion hors ligne : le mot de passe
 // lui-meme n'est JAMAIS garde dans le telephone.
+// Ancienne empreinte (jusqu'a 2026.11.18-1) : SHA-256 rapide, sans sel. Encore reconnue une fois,
+// puis remplacee par l'empreinte lente (PBKDF2, sel au hasard), comme sur le telephone de pointage :
+// un telephone vole ne permet plus de retrouver le mot de passe en essayant des millions de codes.
 async function empreinteMotDePasse(code, motDePasse) {
   return hacherMotDePasse(`${code}:${motDePasse}`);
+}
+
+const ITERATIONS_EMPREINTE = 150000;
+
+function enHexa(octets) {
+  return Array.from(new Uint8Array(octets)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+function depuisHexa(texte) {
+  return new Uint8Array(String(texte).match(/.{2}/g).map(x => parseInt(x, 16)));
+}
+
+async function calculerEmpreinteLente(code, motDePasse, sel) {
+  const cle = await crypto.subtle.importKey("raw", new TextEncoder().encode(`${code}:${motDePasse}`), "PBKDF2", false, ["deriveBits"]);
+  return enHexa(await crypto.subtle.deriveBits({ name: "PBKDF2", salt: sel, iterations: ITERATIONS_EMPREINTE, hash: "SHA-256" }, cle, 256));
+}
+
+async function nouvelleEmpreinteLente(code, motDePasse) {
+  const sel = crypto.getRandomValues(new Uint8Array(16));
+  return { sel: enHexa(sel), valeur: await calculerEmpreinteLente(code, motDePasse, sel) };
+}
+
+// Le mot de passe tape correspond-il a la session gardee ? Remplace l'ancienne empreinte au passage.
+async function motDePasseDeLaSession(session, code, motDePasse) {
+  if (!session || session.code !== code) return false;
+  if (session.empreinte_lente) {
+    try {
+      return (await calculerEmpreinteLente(code, motDePasse, depuisHexa(session.empreinte_lente.sel))) === session.empreinte_lente.valeur;
+    } catch (erreur) {
+      return false;
+    }
+  }
+  if (session.empreinte_mot_de_passe && session.empreinte_mot_de_passe === await empreinteMotDePasse(code, motDePasse)) {
+    session.empreinte_lente = await nouvelleEmpreinteLente(code, motDePasse);
+    delete session.empreinte_mot_de_passe;
+    await stockerObjet("session", session);
+    return true;
+  }
+  return false;
 }
 
 function genererUUID() {
@@ -1012,8 +1054,9 @@ async function verifierSessionExistante() {
   if (session) {
     // Anciennes versions : le mot de passe etait garde en clair -> remplace par son empreinte.
     if (session.mot_de_passe_verifie) {
-      session.empreinte_mot_de_passe = await empreinteMotDePasse(session.code, session.mot_de_passe_verifie);
+      session.empreinte_lente = await nouvelleEmpreinteLente(session.code, session.mot_de_passe_verifie);
       delete session.mot_de_passe_verifie;
+      delete session.empreinte_mot_de_passe;
       await stockerObjet("session", session);
     }
     afficherApp(session);
@@ -1070,8 +1113,7 @@ async function seConnecter() {
   }
 
   const sessionExistante = await lireObjet("session", "agent");
-  const empreinte = await empreinteMotDePasse(code, motDePasse);
-  if (sessionExistante && sessionExistante.code === code && sessionExistante.empreinte_mot_de_passe === empreinte) {
+  if (await motDePasseDeLaSession(sessionExistante, code, motDePasse)) {
     // Reconnexion hors-ligne : on ne revalide pas le mot de passe aupres du
     // serveur (impossible sans internet), on fait confiance a la session locale.
     afficherApp(sessionExistante);
@@ -1099,7 +1141,7 @@ async function seConnecter() {
       cle: "agent",
       code: code,
       nom: nomAgent,
-      empreinte_mot_de_passe: empreinte,
+      empreinte_lente: await nouvelleEmpreinteLente(code, motDePasse),
       access_token: donnees.access_token,
       refresh_token: donnees.refresh_token,
       expires_at: Date.now() + donnees.expires_in * 1000,
@@ -1116,7 +1158,7 @@ async function seConnecter() {
 async function seDeconnecter() {
   const enAttente = document.getElementById("nav-compteur-attente").textContent;
   const avertissement = Number(enAttente) > 0
-    ? `${enAttente} element(s) ne sont pas encore synchronises : ils restent dans le telephone et seront envoyes apres la reconnexion.\n\n`
+    ? `${enAttente} element(s) ne sont pas encore synchronises : ils restent dans le telephone. Chacun part quand l'agent qui l'a saisi se reconnecte sur ce telephone et appuie sur « Synchroniser ».\n\n`
     : "";
   if (!confirm(`${avertissement}Se deconnecter ? Il faudra une connexion internet pour se reconnecter.`)) return;
   // Vraie deconnexion : la session (jetons + empreinte) est effacee du telephone.
@@ -1176,7 +1218,7 @@ document.getElementById("m-mode").addEventListener("change", (e) => {
 async function rafraichirListeClientsLocaux() {
   const selecteur = document.getElementById("m-client-local");
   if (!selecteur) return;
-  const clients = await listerObjets("clients");
+  const clients = (await listerObjets("clients")).filter(deCetAgent);
   selecteur.innerHTML = "";
   if (!clients.length) {
     selecteur.innerHTML = "<option value=''>Aucun client cree pour l'instant</option>";
@@ -2665,7 +2707,7 @@ async function chargerHistoriqueMises() {
           ${m.resultat_message ? `<span style="font-size:13px; color:${estNouvellePage ? "#E99A0C" : "#212529"}; margin-top:4px; font-weight:${estNouvellePage ? "600" : "400"};">${echapper(m.resultat_message)}</span>` : ""}
           ${dejaSignalees.has(m.id_local)
             ? `<span style="font-size:13px; color:#198754; margin-top:6px;">Erreur signalee au bureau.</span>`
-            : `<button style="margin-top:8px; width:auto; padding:6px 14px; background:#6c757d;" onclick="signalerErreurMise('${echapper(m.id_local)}', ${Number(m.numero_carnet) || 0}, ${Number(m.montant_unitaire) || 0}, ${Number(m.nombre_mise) || 1}, '${echapper(m.date_saisie)}')">Signaler une erreur</button>`}
+            : `<button style="margin-top:8px; width:auto; padding:6px 14px; background:#6c757d;" onclick="signalerErreurMise(${echapper(JSON.stringify(String(m.id_local)))}, ${Number(m.numero_carnet) || 0}, ${Number(m.montant_unitaire) || 0}, ${Number(m.nombre_mise) || 1}, ${echapper(JSON.stringify(String(m.date_saisie ?? "")))})">Signaler une erreur</button>`}
         </div>`;
     });
     conteneur.innerHTML = htmlMises;
@@ -2731,8 +2773,8 @@ let pageCourante = "mise";
 
 async function totalEnAttente() {
   let total = 0;
-  for (const magasin of MAGASINS_A_ENVOYER) total += (await listerObjets(magasin)).filter(x => !x.synchronise).length;
-  total += (await listerObjets("clients")).filter(c => c.synchronise && photoEnAttente(c)).length;
+  for (const magasin of MAGASINS_A_ENVOYER) total += (await listerObjets(magasin)).filter(aEnvoyerParMoi).length;
+  total += (await listerObjets("clients")).filter(c => c.synchronise && photoEnAttente(c) && deCetAgent(c)).length;
   return total;
 }
 
@@ -2787,7 +2829,11 @@ async function rafraichirListeAttente() {
   const compteurEl = document.getElementById("nav-compteur-attente");
   compteurEl.textContent = total;
   compteurEl.className = total > 0 ? "compteur" : "compteur cache";
-  mettreAJourBandeauEnvoi(total);
+  mettreAJourBandeauEnvoi(await totalEnAttente());
+  const autres = await enAttenteDesAutresAgents();
+  if (autres.length) {
+    conteneur.innerHTML += `<div class="ligne-attente" style="background:#FEF3C7;"><span>Saisi sur ce telephone par un autre agent : ${autres.map(a => `${echapper(a.nombre)} element(s) de ${echapper(a.code)}`).join(", ")}. Ils partiront quand cet agent se connectera ici.</span></div>`;
+  }
 
   clients.forEach(c => {
     conteneur.innerHTML += `<div class="ligne-attente"><span>Client : ${echapper(c.nom)}${photoEnAttente(c) ? " (avec sa photo)" : ""}</span><span class="badge">en attente</span></div>`;
@@ -2798,7 +2844,8 @@ async function rafraichirListeAttente() {
   mises.forEach(m => {
     const carnetConnu = m.numero_carnet ? decrireCarnet(m.numero_carnet).carnet : null;
     const cible = m.numero_carnet ? `carnet ${echapper(m.numero_carnet)}${carnetConnu ? ` (${echapper(carnetConnu.nom_client)})` : ""}` : "nouveau client (en attente de numero)";
-    conteneur.innerHTML += `<div class="ligne-attente" style="flex-wrap:wrap;"><span>Mise ${cible} : ${echapper(m.montant_unitaire * m.nombre_mise)} F</span><span class="badge">en attente</span><button style="margin-top:6px; width:auto; padding:6px 14px; background:#dc3545;" onclick="supprimerMiseEnAttente('${echapper(m.id_local)}')">Supprimer</button></div>`;
+    const parAutre = deCetAgent(m) ? "" : ` (saisie par ${echapper(m.agent_id)})`;
+    conteneur.innerHTML += `<div class="ligne-attente" style="flex-wrap:wrap;"><span>Mise ${cible}${parAutre} : ${echapper(m.montant_unitaire * m.nombre_mise)} F</span><span class="badge">en attente</span><button style="margin-top:6px; width:auto; padding:6px 14px; background:#dc3545;" onclick="supprimerMiseEnAttente(${echapper(JSON.stringify(String(m.id_local)))})">Supprimer</button></div>`;
   });
   misesSupprimees.forEach(x => {
     conteneur.innerHTML += `<div class="ligne-attente"><span>Mise supprimee ${x.numero_carnet ? `carnet ${echapper(x.numero_carnet)}` : "(nouveau client)"} : ${echapper(x.montant_unitaire * x.nombre_mise)} F</span><span class="badge">trace a envoyer</span></div>`;
@@ -2834,6 +2881,34 @@ async function rafraichirListeAttente() {
   });
 }
 
+// ---- Telephone partage par deux agents ----
+// Le serveur n'accepte une ligne que si son agent_id est le code de l'agent connecte. Ce qu'un autre
+// agent a saisi sur ce telephone (remplacement, telephone prete) ne part donc pas avec ce compte : il
+// reste dans le telephone et part quand cet agent se connecte ici. Avant, ces lignes echouaient a chaque
+// envoi sans explication (HTTP 403).
+let codeEnvoi = null;
+
+function deCetAgent(x) {
+  const code = codeEnvoi || codeAgentConnecte;
+  return !x.agent_id || !code || x.agent_id === code;
+}
+
+function aEnvoyerParMoi(x) {
+  return !x.synchronise && deCetAgent(x);
+}
+
+// [{code, nombre}] : ce qui attend sur ce telephone et appartient a d'autres agents.
+async function enAttenteDesAutresAgents() {
+  const parCode = new Map();
+  for (const magasin of MAGASINS_A_ENVOYER) {
+    for (const x of await listerObjets(magasin)) {
+      const enAttente = !x.synchronise || (magasin === "clients" && photoEnAttente(x));
+      if (enAttente && !deCetAgent(x)) parCode.set(x.agent_id, (parCode.get(x.agent_id) || 0) + 1);
+    }
+  }
+  return [...parCode.entries()].map(([code, nombre]) => ({ code, nombre }));
+}
+
 async function synchroniser() {
   return unSeulALaFois("synchro", synchroniserInterne);
 }
@@ -2843,6 +2918,8 @@ async function synchroniserInterne() {
   const messageEl = document.getElementById("sync-message");
   messageEl.className = "";
   messageEl.textContent = "Synchronisation en cours...";
+  const sessionEnvoi = await lireObjet("session", "agent");
+  codeEnvoi = sessionEnvoi ? sessionEnvoi.code : null;
 
   await telechargerClientsRecherche();
   await telechargerListeCarnets();
@@ -2857,7 +2934,7 @@ async function synchroniserInterne() {
   const detailsErreurs = [];
 
   const photosDejaEssayees = new Set(); // une photo n'est essayee qu'une fois par envoi
-  const clients = (await listerObjets("clients")).filter(c => !c.synchronise);
+  const clients = (await listerObjets("clients")).filter(aEnvoyerParMoi);
   for (const client of clients) {
     // La photo d'abord. Si elle ne part pas, la fiche du client part quand meme (il lui faut
     // son numero de carnet) et la photo reste dans le telephone : elle repartira au prochain envoi.
@@ -2893,7 +2970,7 @@ async function synchroniserInterne() {
   }
 
   // Photos restees dans le telephone alors que la fiche du client est deja partie : nouvel essai.
-  const photosEnRetard = (await listerObjets("clients")).filter(c => c.synchronise && photoEnAttente(c) && !photosDejaEssayees.has(c.id_local));
+  const photosEnRetard = (await listerObjets("clients")).filter(c => c.synchronise && photoEnAttente(c) && !photosDejaEssayees.has(c.id_local) && deCetAgent(c));
   for (const client of photosEnRetard) {
     try {
       await envoyerPhotoClient(client);
@@ -2904,7 +2981,7 @@ async function synchroniserInterne() {
     }
   }
 
-  const mises = (await listerObjets("mises")).filter(m => !m.synchronise);
+  const mises = (await listerObjets("mises")).filter(aEnvoyerParMoi);
   for (const mise of mises) {
     const corps = { ...mise };
     delete corps.synchronise;
@@ -2932,7 +3009,7 @@ async function synchroniserInterne() {
   }
 
   for (const [magasin, table, libelle] of [["mises_supprimees", "mises_supprimees_mobile", "Mise supprimee"], ["signalements", "signalements_mobile", "Erreur signalee"], ["papiers_du_jour", "papier_du_jour_mobile", "Mises sur papier"]]) {
-    const traces = (await listerObjets(magasin)).filter(x => !x.synchronise);
+    const traces = (await listerObjets(magasin)).filter(aEnvoyerParMoi);
     for (const trace of traces) {
       const corps = { ...trace };
       delete corps.synchronise;
@@ -2958,7 +3035,7 @@ async function synchroniserInterne() {
     }
   }
 
-  const demandesCredit = (await listerObjets("demandes_credit")).filter(d => !d.synchronise);
+  const demandesCredit = (await listerObjets("demandes_credit")).filter(aEnvoyerParMoi);
   for (const demande of demandesCredit) {
     // La signature et la piece d'abord : le bureau n'accepte pas une demande signee sans elles.
     try {
@@ -2994,7 +3071,7 @@ async function synchroniserInterne() {
     }
   }
 
-  const confirmationsRemise = (await listerObjets("confirmations_remise")).filter(c => !c.synchronise);
+  const confirmationsRemise = (await listerObjets("confirmations_remise")).filter(aEnvoyerParMoi);
   for (const confirmation of confirmationsRemise) {
     const corps = { ...confirmation };
     delete corps.synchronise;
@@ -3019,7 +3096,7 @@ async function synchroniserInterne() {
     }
   }
 
-  const fermeturesVolontaires = (await listerObjets("fermetures_volontaires")).filter(f => !f.synchronise);
+  const fermeturesVolontaires = (await listerObjets("fermetures_volontaires")).filter(aEnvoyerParMoi);
   for (const fermeture of fermeturesVolontaires) {
     const corps = { ...fermeture };
     delete corps.synchronise;
@@ -3044,7 +3121,7 @@ async function synchroniserInterne() {
     }
   }
 
-  const reprisesHistoriques = (await listerObjets("reprises_historiques")).filter(r => !r.synchronise);
+  const reprisesHistoriques = (await listerObjets("reprises_historiques")).filter(aEnvoyerParMoi);
   for (const reprise of reprisesHistoriques) {
     const corps = { ...reprise };
     delete corps.synchronise;
@@ -3069,7 +3146,7 @@ async function synchroniserInterne() {
     }
   }
 
-  const rattrapages = (await listerObjets("rattrapages")).filter(r => !r.synchronise);
+  const rattrapages = (await listerObjets("rattrapages")).filter(aEnvoyerParMoi);
   for (const rattrapage of rattrapages) {
     const corps = { ...rattrapage };
     delete corps.synchronise;
@@ -3094,7 +3171,7 @@ async function synchroniserInterne() {
     }
   }
 
-  const confirmationsPenalite = (await listerObjets("confirmations_penalite")).filter(c => !c.synchronise);
+  const confirmationsPenalite = (await listerObjets("confirmations_penalite")).filter(aEnvoyerParMoi);
   for (const confirmation of confirmationsPenalite) {
     const corps = { ...confirmation };
     delete corps.synchronise;
@@ -3119,7 +3196,7 @@ async function synchroniserInterne() {
     }
   }
 
-  const operationsCarnet = (await listerObjets("operations_carnet")).filter(o => !o.synchronise);
+  const operationsCarnet = (await listerObjets("operations_carnet")).filter(aEnvoyerParMoi);
   for (const operation of operationsCarnet) {
     const corps = { ...operation };
     delete corps.synchronise;
@@ -3148,6 +3225,11 @@ async function synchroniserInterne() {
   let texteResume = `${envoyes} element(s) synchronise(s), ${echecs} echec(s).`;
   if (detailsErreurs.length > 0) {
     texteResume += "<br><br><b>Detail des erreurs :</b><br>" + detailsErreurs.map(d => d.replace(/</g, "&lt;")).join("<br>");
+  }
+  const autres = await enAttenteDesAutresAgents();
+  if (autres.length) {
+    texteResume += "<br><br><b>Pas envoye (saisi par un autre agent sur ce telephone) :</b> " + autres.map(a => `${a.nombre} element(s) de ${a.code.replace(/</g, "&lt;")}`).join(", ")
+      + ". Le bureau n'accepte que ce que l'agent envoie lui-meme : ils partiront quand cet agent se connectera sur ce telephone et appuiera sur « Synchroniser ».";
   }
   if (detailsErreurs.some(d => d.includes("HTTP 401"))) {
     texteResume += "<br><br><b>Ta connexion a expire.</b> Appuie sur « Sortir » puis reconnecte-toi avec Internet. Tout ce que tu as saisi reste dans le telephone et partira apres.";
