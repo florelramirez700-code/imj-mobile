@@ -378,7 +378,7 @@ async function afficherListe() {
     const arrivee = pointage
       ? `<span class="arrivee">Arrivée ${echapper(pointage.heure_affichee)}${pointage.envoye ? "" : "<small>en attente d'envoi</small>"}</span>`
       : "";
-    html += `<button class="bouton-agent${pointage ? " pointe" : ""}" onclick="choisirAgent('${echapper(agent.code_agent)}')">
+    html += `<button class="bouton-agent${pointage ? " pointe" : ""}" onclick="choisirAgent(${echapper(JSON.stringify(String(agent.code_agent)))})">
       <span>${echapper(agent.nom)}<span class="code">${echapper(agent.code_agent)}</span></span>${arrivee}</button>`;
   }
   if (!agents.length) {
