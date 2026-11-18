@@ -538,7 +538,7 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.11.17-2";
+const VERSION_APP = "2026.11.18-1";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
@@ -2011,9 +2011,25 @@ async function chercherClientExistant() {
       headers: await enTetesAuth(),
       cache: "no-store"
     }, 8000);
+    // Connexion expiree ou serveur en panne : ne JAMAIS dire « aucun client trouve »
+    // (l'agent creerait le client une 2e fois). On cherche dans la copie du telephone.
+    if (reponse.status === 401 || reponse.status === 403) {
+      const clientLocal = await lireObjet("clients_cache", telephone);
+      if (clientLocal) {
+        clientExistantTrouve = clientLocal;
+        messageEl.className = "";
+        messageEl.textContent = "(Trouve dans la derniere copie du telephone. Ta connexion a expire : reconnecte-toi avec Internet des que possible.)";
+        document.getElementById("gc-nom-trouve").textContent = `${clientLocal.nom} ${clientLocal.prenom || ""} -- ${clientLocal.telephone}`;
+        return;
+      }
+      messageEl.className = "erreur";
+      messageEl.textContent = "Ta connexion a expire : impossible de chercher. Appuie sur « Sortir » puis reconnecte-toi avec Internet. Ne cree pas ce client en nouveau client.";
+      return;
+    }
+    if (!reponse.ok) throw new Error(`Reponse ${reponse.status}`);
     const resultats = await reponse.json();
 
-    if (!resultats.length) {
+    if (!Array.isArray(resultats) || !resultats.length) {
       messageEl.className = "erreur";
       messageEl.textContent = "Aucun client trouve avec ce telephone. Verifie le numero, ou choisis 'Nouveau client' au lieu.";
       return;
@@ -3137,7 +3153,25 @@ async function synchroniserInterne() {
     texteResume += "<br><br><b>Ta connexion a expire.</b> Appuie sur « Sortir » puis reconnecte-toi avec Internet. Tout ce que tu as saisi reste dans le telephone et partira apres.";
   }
   messageEl.innerHTML = texteResume;
+  await viderVieillesMises();
   rafraichirListeAttente();
+}
+
+// Les mises deja envoyees au bureau depuis plus de JOURS_MISES_GARDEES jours sont retirees du
+// telephone : sinon la liste grossit sans fin et l'ecran Mise ralentit au fil des mois. Rien n'est
+// perdu (elles sont au bureau) ; une mise PAS encore envoyee n'est jamais retiree.
+// 60 jours : bien plus que le papier (31 jours en arriere) et que la position du carnet.
+const JOURS_MISES_GARDEES = 60;
+
+async function viderVieillesMises() {
+  try {
+    const limite = new Date(maintenant().getTime() - JOURS_MISES_GARDEES * 86400000).toISOString().split("T")[0];
+    for (const mise of await listerObjets("mises")) {
+      if (mise.synchronise && mise.date_saisie && mise.date_saisie < limite) await supprimerObjet("mises", mise.id_local);
+    }
+  } catch (erreur) {
+    // Pas grave : on retentera au prochain envoi.
+  }
 }
 
 document.getElementById("version-affichee-connexion").textContent = VERSION_APP;
