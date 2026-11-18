@@ -469,9 +469,13 @@
       <div class="carte">
         <h2>Mes clients recents</h2>
         <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Numero de carnet reel attribue par le bureau, une fois ta saisie traitee.</p>
-        <button onclick="chargerMesClientsRecents()">Actualiser</button>
+        <button onclick="chargerEcranMesClients()">Actualiser</button>
         <div id="liste-clients-recents" style="margin-top:14px;"></div>
         <p id="clients-recents-message"></p>
+        <h3 style="margin-top:18px;">Mes carnets en plus et remplacements</h3>
+        <p style="font-size:12px; color:#9B9CA1; margin:4px 0;">Faits avec « Gerer un carnet » ces 30 derniers jours : le numero donne par le bureau, une fois ton operation traitee. Ecris ce numero sur la couverture du carnet, et seulement celui-la.</p>
+        <div id="liste-operations-carnet" style="margin-top:8px;"></div>
+        <p id="operations-carnet-message"></p>
       </div>
     </div>
 
@@ -534,7 +538,7 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.11.17-1";
+const VERSION_APP = "2026.11.17-2";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
@@ -1159,7 +1163,7 @@ function allerA(page) {
   if (page === "mon-papier") chargerMonPapier(true);
   if (page === "mes-retards") chargerMesRetards();
   if (page === "mes-penalites") chargerMesPenalites();
-  if (page === "mes-clients") chargerMesClientsRecents();
+  if (page === "mes-clients") chargerEcranMesClients();
 }
 
 document.getElementById("m-mode").addEventListener("change", (e) => {
@@ -2078,6 +2082,9 @@ async function enregistrerOperationCarnetInterne() {
     if (mise <= 0) { messageEl.textContent = "La mise de depart doit etre superieure a 0."; return; }
 
     operation.telephone_client = clientExistantTrouve.telephone;
+    // Le nom sert seulement a l'affichage (Attente, « Mes clients recents ») : le bureau trouve le client par son telephone.
+    operation.nom_client = clientExistantTrouve.nom || null;
+    operation.prenom_client = clientExistantTrouve.prenom || null;
     operation.type_carnet = document.getElementById("gc-type-carnet").value;
     operation.categorie = document.getElementById("gc-categorie").value;
     operation.mise_depart = mise;
@@ -2101,7 +2108,9 @@ async function enregistrerOperationCarnetInterne() {
   await stockerObjet("operations_carnet", operation);
 
   messageEl.className = "succes";
-  messageEl.textContent = "Enregistre localement. Sera traite a la prochaine synchronisation.";
+  messageEl.textContent = operation.type_operation === "changement" && operation.motif === "fin_cycles"
+    ? "Enregistre localement. Sera traite a la prochaine synchronisation."
+    : "Enregistre localement. Envoie-le : une fois traite au bureau, le numero du nouveau carnet s'affiche dans Plus > « Mes clients recents ».";
   document.getElementById("gc-telephone-recherche").value = "";
   document.getElementById("gc-mise").value = "";
   document.getElementById("gc-numero-carnet").value = "";
@@ -2151,6 +2160,149 @@ async function chargerMesClientsRecents() {
   } catch (erreur) {
     messageEl.className = "erreur";
     messageEl.textContent = "Impossible de charger, et aucune copie dans le telephone : ouvre cet ecran une fois avec internet.";
+  }
+}
+
+// L'ecran « Mes clients recents » : les nouveaux clients, puis les carnets en plus et les remplacements.
+function chargerEcranMesClients() {
+  chargerMesClientsRecents();
+  chargerMesOperationsCarnet();
+}
+
+// ---- Carnets en plus et remplacements (17/11/2026) ---------------------------
+// Faits avec « Gerer un carnet » : carnet en plus pour un client deja chez IMJ, carnet perdu ou abime,
+// fin des pages. Le pont du bureau ecrit dans operations_carnet_mobile le numero donne par Core
+// (numero_carnet_assigne) ou l'erreur (message_erreur). Le serveur ne rend a l'agent que SES lignes
+// (sql/operations_carnet_mobile.sql) ; la demande ne porte de toute facon que sur son code. Les operations
+// du telephone pas encore envoyees, ou envoyees apres la copie gardee, s'y ajoutent.
+const JOURS_OPERATIONS_CARNET = 30;
+const COLONNES_OPERATIONS_CARNET = "id_local,agent_id,type_operation,motif,numero_carnet,numero_carnet_assigne,telephone_client,nom_client,prenom_client,categorie,date_operation,created_at,statut_import,message_erreur";
+let listeCarnetsRepriseApresNumero = false;
+
+function titreOperationCarnet(o, nomClient) {
+  const jour = jourCourt(o.date_operation || o.created_at);
+  const fin = `${nomClient ? ` -- ${echapper(nomClient)}` : ""}${jour ? ` (${jour})` : ""}`;
+  const numero = echapper(o.numero_carnet);
+  if (o.type_operation === "carnet_existant") return `Carnet en plus${fin}`;
+  if (o.type_operation === "changement" && o.motif === "perte") return `Carnet perdu n° ${numero}${fin}`;
+  if (o.type_operation === "changement" && o.motif === "endommage") return `Carnet abime n° ${numero}${fin}`;
+  if (o.type_operation === "changement") return `Fin des pages, carnet n° ${numero}${o.categorie ? ` (passe ${echapper(o.categorie)})` : ""}${fin}`;
+  return `Operation carnet${fin}`;
+}
+
+// Pas encore envoyee, en attente du bureau, le numero du carnet, ou l'erreur du bureau.
+// Une erreur corrigee puis traitee garde parfois son ancien message : seul le statut compte.
+function etatOperationCarnet(o) {
+  if (o.a_envoyer) return { badge: "Pas encore envoyee au bureau", style: "background:#E9ECEF; color:#495057;" };
+  if (o.statut_import === "importe") {
+    const vert = "background:#D1FAE5; color:#065F46;";
+    if (o.numero_carnet_assigne === null || o.numero_carnet_assigne === undefined || o.numero_carnet_assigne === "") {
+      return { badge: "Traitee au bureau", style: vert };
+    }
+    const numero = echapper(o.numero_carnet_assigne);
+    if (o.type_operation !== "changement") return { badge: `Carnet n° ${numero}`, style: vert };
+    return Number(o.numero_carnet_assigne) === Number(o.numero_carnet)
+      ? { badge: `Meme numero : carnet n° ${numero}`, style: vert }
+      : { badge: `Nouveau numero : carnet n° ${numero}`, style: vert };
+  }
+  if (o.statut_import === "erreur") {
+    return { badge: "Erreur du bureau", style: "background:#FEE2E2; color:#991B1B;", detail: o.message_erreur || "A verifier au bureau." };
+  }
+  return { badge: "En attente de traitement au bureau", style: "background:#FEF3C7; color:#92400E;" };
+}
+
+// Le nom du client : envoye avec l'operation (depuis le 17/11/2026), sinon la liste des carnets,
+// sinon la recherche des clients gardee dans le telephone, sinon son telephone.
+async function nomClientDeOperation(o) {
+  const nom = [o.nom_client, o.prenom_client].filter(Boolean).join(" ");
+  if (nom) return nom;
+  const carnet = carnetsConnus.get(Number(o.numero_carnet_assigne)) || carnetsConnus.get(Number(o.numero_carnet));
+  if (carnet && carnet.nom_client) return carnet.nom_client;
+  if (!o.telephone_client) return "";
+  try {
+    const client = await lireObjet("clients_cache", String(o.telephone_client));
+    const nomTrouve = client ? `${client.nom || ""} ${client.prenom || ""}`.trim() : "";
+    return nomTrouve || String(o.telephone_client);
+  } catch (erreur) {
+    return String(o.telephone_client);
+  }
+}
+
+async function chargerMesOperationsCarnet() {
+  const conteneur = document.getElementById("liste-operations-carnet");
+  const messageEl = document.getElementById("operations-carnet-message");
+  messageEl.className = "";
+  messageEl.textContent = "Chargement...";
+  conteneur.innerHTML = "";
+
+  const session = await lireObjet("session", "agent");
+  const depuis = new Date(maintenant().getTime() - JOURS_OPERATIONS_CARNET * 24 * 3600 * 1000).toISOString().split("T")[0];
+
+  let duBureau = [];
+  let dateCopie = null;
+  let rienDuBureau = false;
+  try {
+    const lecture = await lireAvecCopie("operations_carnet",
+      `operations_carnet_mobile?agent_id=eq.${encodeURIComponent(session.code)}&created_at=gte.${depuis}&order=created_at.desc&limit=30&select=${COLONNES_OPERATIONS_CARNET}`);
+    duBureau = Array.isArray(lecture.donnees) ? lecture.donnees : [];
+    dateCopie = lecture.dateCopie;
+  } catch (erreur) {
+    rienDuBureau = true;
+  }
+
+  // Le telephone peut servir a deux agents : seulement les operations de l'agent connecte.
+  // Ce que dit le bureau passe avant ce que sait le telephone.
+  const parId = new Map();
+  (await listerObjets("operations_carnet"))
+    .filter(o => o.agent_id === session.code)
+    .forEach(o => parId.set(o.id_local, { ...o, a_envoyer: !o.synchronise, statut_import: "en_attente" }));
+  duBureau
+    .filter(o => !o.agent_id || o.agent_id === session.code)
+    .forEach(o => parId.set(o.id_local, o));
+
+  const limite = new Date(depuis).getTime();
+  const operations = [...parId.values()]
+    .filter(o => new Date(o.created_at).getTime() >= limite)
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    .slice(0, 30);
+
+  if (!operations.length) {
+    if (rienDuBureau) {
+      messageEl.className = "erreur";
+      messageEl.textContent = "Impossible de charger, et aucune copie dans le telephone : ouvre cet ecran une fois avec internet.";
+    } else {
+      messageEl.className = "succes";
+      messageEl.textContent = "Aucun carnet en plus ni remplacement ces 30 derniers jours." + mentionCopie(dateCopie);
+    }
+    return;
+  }
+
+  let htmlOperations = "";
+  for (const o of operations) {
+    const etat = etatOperationCarnet(o);
+    htmlOperations += `
+      <div class="ligne-attente" style="flex-direction:column; align-items:flex-start;">
+        <span><b>${titreOperationCarnet(o, await nomClientDeOperation(o))}</b></span>
+        <span class="badge" style="${etat.style} margin-top:4px;">${etat.badge}</span>
+        ${etat.detail ? `<span style="font-size:13px; color:#991B1B; margin-top:4px;">${echapper(etat.detail)}</span>` : ""}
+      </div>`;
+  }
+  conteneur.innerHTML = htmlOperations;
+  if (rienDuBureau) {
+    messageEl.className = "erreur";
+    messageEl.textContent = "Sans reseau, et aucune copie du bureau dans le telephone : seules les operations de ce telephone sont affichees.";
+  } else {
+    messageEl.className = "";
+    messageEl.textContent = mentionCopie(dateCopie).trim();
+  }
+
+  // Un numero tout juste donne par le bureau : le telephone reprend la liste des carnets (une fois),
+  // pour que l'ecran Mise connaisse deja ce carnet et affiche le nom du client.
+  const numeroPasEncoreConnu = operations.some(o => o.statut_import === "importe" && o.numero_carnet_assigne
+    && !carnetsConnus.has(Number(o.numero_carnet_assigne)));
+  if (!rienDuBureau && !dateCopie && numeroPasEncoreConnu && !listeCarnetsRepriseApresNumero) {
+    listeCarnetsRepriseApresNumero = true;
+    telechargerListeCarnets();
   }
 }
 
@@ -2661,7 +2813,7 @@ async function rafraichirListeAttente() {
     conteneur.innerHTML += `<div class="ligne-attente"><span>Confirmation penalite #${echapper(c.penalite_id)}</span><span class="badge">en attente</span></div>`;
   });
   operationsCarnet.forEach(o => {
-    const libelles = { nouveau_client: `Nouveau client -- ${echapper(o.nom_client)}`, carnet_existant: `Carnet suppl. -- ${echapper(o.telephone_client)}`, changement: `Changement carnet ${echapper(o.numero_carnet)}${o.categorie ? ` (passe ${echapper(o.categorie)})` : ""}` };
+    const libelles = { nouveau_client: `Nouveau client -- ${echapper(o.nom_client)}`, carnet_existant: `Carnet suppl. -- ${echapper([o.nom_client, o.prenom_client].filter(Boolean).join(" ") || o.telephone_client)}`, changement: `Changement carnet ${echapper(o.numero_carnet)}${o.categorie ? ` (passe ${echapper(o.categorie)})` : ""}` };
     conteneur.innerHTML += `<div class="ligne-attente"><span>${libelles[o.type_operation] || "Operation carnet"}</span><span class="badge">en attente</span></div>`;
   });
 }
