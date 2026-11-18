@@ -513,12 +513,51 @@
       </div>
     </div>
 
+    <div id="page-garants" class="cache">
+      <div class="carte">
+        <h2>Garants a faire signer</h2>
+        <p style="font-size:12px; color:#9B9CA1; margin-bottom:10px;">Le bureau a saisi le garant et imprime son engagement (2 copies). Fais signer le garant et le client, puis photographie la COPIE IMJ signee et la piece d'identite du garant. Rapporte ensuite la copie IMJ au bureau. Sans reseau : la derniere liste gardee dans le telephone.</p>
+        <button onclick="chargerGarantsASigner()">Actualiser</button>
+        <div id="liste-garants" style="margin-top:14px;"></div>
+        <p id="garants-message"></p>
+
+        <div id="ga-formulaire" class="cache" style="margin-top:16px;">
+          <h3 id="ga-titre"></h3>
+          <div style="font-size:14px; line-height:1.45; background:#F5F7FA; border-radius:8px; padding:10px;">
+            Avant les photos, verifie sur le papier :
+            <br>1. Le garant a ecrit <b>de sa main</b> le montant maximum, <b>en lettres et en chiffres</b> : <b id="ga-plafond"></b>.
+            <br>2. Le garant a signe et le client a signe. Si le garant ne sait pas ecrire : deux temoins ont signe.
+            <br>3. La piece d'identite du garant est valable et c'est bien lui.
+          </div>
+          <input type="file" accept="image/*" capture="environment" id="ga-papier" style="display:none;">
+          <input type="file" accept="image/*" capture="environment" id="ga-recto" style="display:none;">
+          <input type="file" accept="image/*" capture="environment" id="ga-verso" style="display:none;">
+          <p style="font-size:12px; color:#4A4A4A; margin:10px 0 6px;">Toute la page dans la photo, bien a plat, nette, sans ombre : on doit lire le montant ecrit a la main. Sinon, reprends la photo.</p>
+          <button type="button" class="secondaire" onclick="document.getElementById('ga-papier').click()">Photo du papier signe (copie IMJ) *</button>
+          <img id="ga-papier-apercu" alt="" style="display:none; width:100%; margin-top:6px; border-radius:6px; border:1px solid #CED4DA;">
+          <div style="display:flex; gap:10px; margin-top:10px;">
+            <button type="button" class="secondaire" style="width:auto; flex:1;" onclick="document.getElementById('ga-recto').click()">Piece du garant : recto *</button>
+            <button type="button" class="secondaire" style="width:auto; flex:1;" onclick="document.getElementById('ga-verso').click()">Piece du garant : verso *</button>
+          </div>
+          <div style="display:flex; gap:10px; margin-top:6px;">
+            <img id="ga-recto-apercu" alt="" style="display:none; width:48%; border-radius:6px; border:1px solid #CED4DA;">
+            <img id="ga-verso-apercu" alt="" style="display:none; width:48%; border-radius:6px; border:1px solid #CED4DA;">
+          </div>
+          <label style="display:flex; gap:8px; align-items:center; font-size:14px; margin-top:10px;"><input type="checkbox" id="ga-piece-vue" style="width:auto;"> J'ai vu la piece d'identite du garant : c'est bien la personne qui a signe.</label>
+          <button onclick="enregistrerPhotosGarant()" style="margin-top:12px;">Enregistrer les photos</button>
+          <button type="button" class="secondaire" style="margin-top:6px;" onclick="fermerFormulaireGarant()">Annuler</button>
+        </div>
+        <p id="ga-message"></p>
+      </div>
+    </div>
+
     <div id="page-plus" class="cache">
       <div class="carte">
         <h2>Autres operations</h2>
         <button class="bouton-plus" onclick="allerA('mon-papier')">Mes mises sur papier (a la remise des fonds)</button>
         <button class="bouton-plus" onclick="allerA('credit')">Demander un credit</button>
         <button class="bouton-plus" onclick="allerA('mes-demandes')">Mes demandes de credit</button>
+        <button class="bouton-plus" onclick="allerA('garants')">Garants a faire signer</button>
         <button class="bouton-plus" onclick="allerA('gerer-carnet')">Gerer un carnet (+carnet, remplacement)</button>
         <button class="bouton-plus" onclick="allerA('fermeture')">Fermer un cycle</button>
         <button class="bouton-plus" onclick="allerA('mes-penalites')">Mes penalites a recuperer</button>
@@ -538,12 +577,12 @@
 </div>
 
 <script>
-const VERSION_APP = "2026.11.18-3";
+const VERSION_APP = "2026.11.18-4";
 const SUPABASE_URL = "https://kguscrexaptukrrgyymt.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndXNjcmV4YXB0dWtycmd5eW10Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcxNzc5MzksImV4cCI6MjEwMjc1MzkzOX0.lT0P_-yZUXpXqdrSYckAsRh9SWtbN3tUiuzl1Y_nvU4";
 
 let db;
-const requeteDB = indexedDB.open("imj_mobile", 15);
+const requeteDB = indexedDB.open("imj_mobile", 16);
 requeteDB.onupgradeneeded = (e) => {
   db = e.target.result;
   if (!db.objectStoreNames.contains("session")) db.createObjectStore("session", { keyPath: "cle" });
@@ -562,6 +601,7 @@ requeteDB.onupgradeneeded = (e) => {
   if (!db.objectStoreNames.contains("mises_supprimees")) db.createObjectStore("mises_supprimees", { keyPath: "id_local" });
   if (!db.objectStoreNames.contains("signalements")) db.createObjectStore("signalements", { keyPath: "id_local" });
   if (!db.objectStoreNames.contains("papiers_du_jour")) db.createObjectStore("papiers_du_jour", { keyPath: "id_local" });
+  if (!db.objectStoreNames.contains("garants_signes")) db.createObjectStore("garants_signes", { keyPath: "id_local" });
 };
 requeteDB.onsuccess = (e) => {
   db = e.target.result;
@@ -1249,7 +1289,7 @@ function afficherApp(session) {
 
 window.addEventListener("online", () => { if (codeAgentConnecte) verifierTelephoneAnnule(); });
 
-const TOUTES_LES_PAGES = ["nouveau-client", "mise", "credit", "mes-demandes", "mon-rapport", "gerer-carnet", "mes-penalites", "mes-clients", "fermeture", "mes-retards", "mon-papier", "attente", "plus"];
+const TOUTES_LES_PAGES = ["nouveau-client", "mise", "credit", "mes-demandes", "mon-rapport", "gerer-carnet", "mes-penalites", "mes-clients", "fermeture", "mes-retards", "mon-papier", "garants", "attente", "plus"];
 // Onglet du bas a allumer pour chaque page (toutes les autres pages sont dans "Plus").
 const ONGLET_DE_LA_PAGE = { "mise": "mise", "nouveau-client": "client", "attente": "attente" };
 
@@ -1273,6 +1313,7 @@ function allerA(page) {
   if (page === "mes-retards") chargerMesRetards();
   if (page === "mes-penalites") chargerMesPenalites();
   if (page === "mes-clients") chargerEcranMesClients();
+  if (page === "garants") { fermerFormulaireGarant(); chargerGarantsASigner(); }
 }
 
 document.getElementById("m-mode").addEventListener("change", (e) => {
@@ -1626,12 +1667,12 @@ let photoPieceRecto = null;
 let photoPieceVerso = null;
 let signatureTracee = false;
 
-function reduirePhotoPiece(base64DataUrl) {
+function reduirePhotoPiece(base64DataUrl, coteMax = PIECE_COTE_MAX) {
   return new Promise((resolve) => {
     const image = new Image();
     image.onload = () => {
       try {
-        const echelle = Math.min(1, PIECE_COTE_MAX / Math.max(image.width, image.height));
+        const echelle = Math.min(1, coteMax / Math.max(image.width, image.height));
         const toile = document.createElement("canvas");
         toile.width = Math.max(1, Math.round(image.width * echelle));
         toile.height = Math.max(1, Math.round(image.height * echelle));
@@ -1920,6 +1961,152 @@ async function enregistrerDemandeCreditInterne() {
   messageEl.className = "succes";
   messageEl.textContent = "Demande signee enregistree dans le telephone. Elle partira au bureau a la prochaine synchronisation.";
   rafraichirListeAttente();
+}
+
+// ---- Garants a faire signer (regle du 18/11/2026) ----
+// Le bureau saisit le garant et imprime l'engagement. L'agent le fait signer sur le terrain, puis
+// photographie la copie IMJ signee et la piece du garant. Les photos partent a la synchronisation,
+// dans le stockage prive du bureau ; le bureau les regarde et note la signature dans IMJ Core.
+const PAPIER_COTE_MAX = 2000;   // le montant ecrit a la main doit rester lisible
+let listeGarants = [];
+let garantEnCours = null;
+let photosGarant = { papier: null, recto: null, verso: null };
+
+async function chargerGarantsASigner() {
+  const conteneur = document.getElementById("liste-garants");
+  const messageEl = document.getElementById("garants-message");
+  messageEl.className = "";
+  conteneur.innerHTML = "";
+  try {
+    const { donnees, dateCopie } = await lireAvecCopie("garants_a_signer", "garants_a_signer_mobile?order=engagement_id.asc");
+    const faitsIci = await listerObjets("garants_signes");
+    // Pas encore envoyees : elles sont dans « Attente », on ne les propose pas une 2e fois.
+    const enAttente = new Set(faitsIci.filter(g => !g.synchronise).map(g => Number(g.engagement_id)));
+    const envoyes = new Map(faitsIci.filter(g => g.synchronise).map(g => [Number(g.engagement_id), g]));
+    listeGarants = donnees.filter(g => !enAttente.has(Number(g.engagement_id)));
+    if (!listeGarants.length) {
+      messageEl.textContent = "Aucun garant a faire signer." + mentionCopie(dateCopie);
+      return;
+    }
+    messageEl.textContent = mentionCopie(dateCopie).trim();
+    let html = "";
+    listeGarants.forEach(g => {
+      const envoi = envoyes.get(Number(g.engagement_id));
+      const id = Number(g.engagement_id);
+      html += `
+        <div class="ligne-attente" style="flex-direction:column; align-items:flex-start;">
+          <div style="display:flex; justify-content:space-between; width:100%;">
+            <span><b>Carnet ${echapper(g.numeros_carnets || "?")}</b> - ${echapper(g.nom_client)}</span>
+            <span class="badge">au plus ${echapper(francsLisibles(g.plafond))}</span>
+          </div>
+          <span style="font-size:13px; margin-top:4px;">Garant : <b>${echapper(g.nom_garant)}</b>${g.telephone_garant ? ` (${echapper(g.telephone_garant)})` : ""} -- engagement n° ${id}${g.prepare_le ? `, prepare le ${echapper(jourCourt(g.prepare_le))}` : ""}</span>
+          ${envoi
+            ? `<span style="font-size:13px; margin-top:4px; color:#0548B3;">Photos envoyees le ${echapper(jourCourt(envoi.photographie_le))} : le bureau les recoit au prochain passage.</span>
+               <button class="secondaire" style="margin-top:8px;" onclick="ouvrirPhotosGarant(${id})">Reprendre les photos (photo ratee)</button>`
+            : `<button style="margin-top:8px;" onclick="ouvrirPhotosGarant(${id})">Photographier le papier signe</button>`}
+        </div>`;
+    });
+    conteneur.innerHTML = html;
+  } catch (erreur) {
+    messageEl.className = "erreur";
+    messageEl.textContent = "Liste des garants pas disponible : ouvre cet ecran une fois avec internet.";
+  }
+}
+
+function viderPhotosGarant() {
+  photosGarant = { papier: null, recto: null, verso: null };
+  ["papier", "recto", "verso"].forEach(quoi => {
+    document.getElementById(`ga-${quoi}`).value = "";
+    const apercu = document.getElementById(`ga-${quoi}-apercu`);
+    apercu.removeAttribute("src");
+    apercu.style.display = "none";
+  });
+  document.getElementById("ga-piece-vue").checked = false;
+}
+
+function ouvrirPhotosGarant(engagementId) {
+  const g = listeGarants.find(x => Number(x.engagement_id) === Number(engagementId));
+  if (!g) return;
+  garantEnCours = g;
+  viderPhotosGarant();
+  document.getElementById("ga-message").textContent = "";
+  document.getElementById("ga-titre").textContent = `${g.nom_garant}, garant de ${g.nom_client} (carnet ${g.numeros_carnets || "?"})`;
+  document.getElementById("ga-plafond").textContent = francsLisibles(g.plafond);
+  document.getElementById("ga-formulaire").className = "";
+  document.getElementById("ga-formulaire").scrollIntoView();
+}
+
+function fermerFormulaireGarant() {
+  garantEnCours = null;
+  viderPhotosGarant();
+  document.getElementById("ga-formulaire").className = "cache";
+}
+
+async function prendrePhotoGarant(quoi, fichier) {
+  if (!fichier) return;
+  const photo = await reduirePhotoPiece(await fichierVersBase64(fichier), quoi === "papier" ? PAPIER_COTE_MAX : PIECE_COTE_MAX);
+  photosGarant[quoi] = photo;
+  const apercu = document.getElementById(`ga-${quoi}-apercu`);
+  apercu.src = photo;
+  apercu.style.display = "block";
+}
+
+document.getElementById("ga-papier").addEventListener("change", (e) => prendrePhotoGarant("papier", e.target.files[0]));
+document.getElementById("ga-recto").addEventListener("change", (e) => prendrePhotoGarant("recto", e.target.files[0]));
+document.getElementById("ga-verso").addEventListener("change", (e) => prendrePhotoGarant("verso", e.target.files[0]));
+
+async function enregistrerPhotosGarant() {
+  return unSeulALaFois("photos-garant", enregistrerPhotosGarantInterne);
+}
+
+async function enregistrerPhotosGarantInterne() {
+  const messageEl = document.getElementById("ga-message");
+  messageEl.className = "erreur";
+  const g = garantEnCours;
+  if (!g) { messageEl.textContent = "Choisis d'abord le garant dans la liste."; return; }
+  if (!photosGarant.papier) { messageEl.textContent = "Prends la photo du papier signe (copie IMJ)."; return; }
+  if (!photosGarant.recto || !photosGarant.verso) { messageEl.textContent = "Prends la photo du recto ET du verso de la piece du garant."; return; }
+  if (!document.getElementById("ga-piece-vue").checked) {
+    messageEl.textContent = "Coche la case « J'ai vu la piece d'identite du garant ».";
+    return;
+  }
+  const session = await lireObjet("session", "agent");
+  const ligne = {
+    id_local: genererUUID(),
+    agent_id: session.code,
+    engagement_id: Number(g.engagement_id),
+    numeros_carnets: g.numeros_carnets || "",
+    nom_client: g.nom_client,
+    nom_garant: g.nom_garant,
+    piece_vue: true,
+    photographie_le: maintenant().toISOString(),
+    created_at: maintenant().toISOString(),
+    papier_base64: photosGarant.papier,
+    piece_recto_base64: photosGarant.recto,
+    piece_verso_base64: photosGarant.verso,
+    papier_url: null,
+    piece_recto_url: null,
+    piece_verso_url: null,
+    synchronise: false
+  };
+  await stockerObjet("garants_signes", ligne);
+  fermerFormulaireGarant();
+  messageEl.className = "succes";
+  messageEl.textContent = `Photos du garant ${g.nom_garant} enregistrees dans le telephone. Elles partiront au bureau a la prochaine synchronisation. Rapporte la copie IMJ signee au bureau.`;
+  await chargerGarantsASigner();
+  rafraichirListeAttente();
+}
+
+// Les 3 photos d'un garant, dans le dossier de l'agent. Chaque photo envoyee est retiree du
+// telephone aussitot : si la suite echoue, elle ne repart pas une 2e fois.
+async function envoyerImagesGarant(ligne) {
+  for (const [nom, suffixe] of [["papier", "papier"], ["piece_recto", "recto"], ["piece_verso", "verso"]]) {
+    const base64 = ligne[`${nom}_base64`];
+    if (!base64 || ligne[`${nom}_url`]) continue;
+    ligne[`${nom}_url`] = await televerserDansStockage("demandes_credit", `${ligne.agent_id}/garant_${ligne.engagement_id}_${ligne.id_local}_${suffixe}.jpg`, base64VersBlob(base64));
+    ligne[`${nom}_base64`] = null;
+    await stockerObjet("garants_signes", ligne);
+  }
 }
 
 // ---- Envoi des images ----
@@ -2839,7 +3026,7 @@ async function signalerErreurMise(idLocalMise, numeroCarnet, montantUnitaire, no
 
 // ---- Bandeau « a envoyer » : il apparait tout seul des qu'il y a Internet et des elements en attente.
 // Rien ne part sans que l'agent appuie : il peut d'abord verifier (et supprimer une erreur) dans « Attente ».
-const MAGASINS_A_ENVOYER = ["clients", "mises", "demandes_credit", "confirmations_remise", "fermetures_volontaires", "reprises_historiques", "rattrapages", "operations_carnet", "confirmations_penalite", "mises_supprimees", "signalements", "papiers_du_jour"];
+const MAGASINS_A_ENVOYER = ["clients", "mises", "demandes_credit", "confirmations_remise", "fermetures_volontaires", "reprises_historiques", "rattrapages", "operations_carnet", "confirmations_penalite", "mises_supprimees", "signalements", "papiers_du_jour", "garants_signes"];
 let pageCourante = "mise";
 
 async function totalEnAttente() {
@@ -2891,11 +3078,12 @@ async function rafraichirListeAttente() {
   const misesSupprimees = (await listerObjets("mises_supprimees")).filter(x => !x.synchronise);
   const signalements = (await listerObjets("signalements")).filter(x => !x.synchronise);
   const papiersDuJour = (await listerObjets("papiers_du_jour")).filter(x => !x.synchronise);
+  const garantsSignes = (await listerObjets("garants_signes")).filter(x => !x.synchronise);
   const conteneur = document.getElementById("liste-attente");
   const rienEl = document.getElementById("rien-attente");
 
   conteneur.innerHTML = "";
-  const total = clients.length + photosEnRetard.length + mises.length + demandesCredit.length + confirmationsRemise.length + fermeturesVolontaires.length + reprisesHistoriques.length + rattrapages.length + operationsCarnet.length + confirmationsPenalite.length + misesSupprimees.length + signalements.length + papiersDuJour.length;
+  const total = clients.length + photosEnRetard.length + mises.length + demandesCredit.length + confirmationsRemise.length + fermeturesVolontaires.length + reprisesHistoriques.length + rattrapages.length + operationsCarnet.length + confirmationsPenalite.length + misesSupprimees.length + signalements.length + papiersDuJour.length + garantsSignes.length;
   rienEl.style.display = total === 0 ? "block" : "none";
   const compteurEl = document.getElementById("nav-compteur-attente");
   compteurEl.textContent = total;
@@ -2930,6 +3118,9 @@ async function rafraichirListeAttente() {
   demandesCredit.forEach(d => {
     const detail = d.signature_base64 || d.signature_url ? ((d.piece_recto_base64 || d.piece_recto_url) ? " (signee, avec la piece)" : " (signee)") : "";
     conteneur.innerHTML += `<div class="ligne-attente"><span>Demande credit carnet ${echapper(d.numero_carnet)}${detail}</span><span class="badge">en attente</span></div>`;
+  });
+  garantsSignes.forEach(g => {
+    conteneur.innerHTML += `<div class="ligne-attente"><span>Photos du garant ${echapper(g.nom_garant)} (carnet ${echapper(g.numeros_carnets)})</span><span class="badge">en attente</span></div>`;
   });
   confirmationsRemise.forEach(c => {
     conteneur.innerHTML += `<div class="ligne-attente"><span>Confirmation remise credit #${echapper(c.credit_id)}</span><span class="badge">en attente</span></div>`;
@@ -3139,6 +3330,42 @@ async function synchroniserInterne() {
       }
     } catch (e) {
       detailsErreurs.push(`Demande credit (carnet ${demande.numero_carnet}) : erreur reseau -- ${e.message}`);
+      echecs++;
+    }
+  }
+
+  const garantsSignes = (await listerObjets("garants_signes")).filter(aEnvoyerParMoi);
+  for (const ligne of garantsSignes) {
+    // Les photos d'abord : le bureau ne recoit la ligne que quand les 3 photos sont arrivees.
+    try {
+      await envoyerImagesGarant(ligne);
+    } catch (e) {
+      detailsErreurs.push(`Photos du garant ${ligne.nom_garant} (carnet ${ligne.numeros_carnets}) : pas parties -- ${e.message}`);
+      echecs++;
+      continue;
+    }
+    const corps = {
+      id_local: ligne.id_local, agent_id: ligne.agent_id, engagement_id: ligne.engagement_id,
+      papier_url: ligne.papier_url, piece_recto_url: ligne.piece_recto_url, piece_verso_url: ligne.piece_verso_url,
+      piece_vue: !!ligne.piece_vue, photographie_le: ligne.photographie_le
+    };
+    try {
+      const reponse = await fetchAvecDelai(`${SUPABASE_URL}/rest/v1/garants_signes_mobile?on_conflict=id_local`, {
+        method: "POST",
+        headers: { ...headers, Prefer: "resolution=ignore-duplicates" },
+        body: JSON.stringify(corps)
+      }, 30000);
+      if (reponse.ok) {
+        ligne.synchronise = true;
+        await stockerObjet("garants_signes", ligne);
+        envoyes++;
+      } else {
+        const texteErreur = await reponse.text();
+        detailsErreurs.push(`Photos du garant ${ligne.nom_garant} : HTTP ${reponse.status} -- ${texteErreur.slice(0, 200)}`);
+        echecs++;
+      }
+    } catch (e) {
+      detailsErreurs.push(`Photos du garant ${ligne.nom_garant} : erreur reseau -- ${e.message}`);
       echecs++;
     }
   }
